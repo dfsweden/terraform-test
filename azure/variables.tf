@@ -331,6 +331,18 @@ variable "availability_set_name" {
 }
 
 # --- Tagging ---
+variable "create_resource_group" {
+  type        = bool
+  default     = false
+  description = "Create resource_group instead of requiring it to exist (location must be set). CAUTION: destroy then deletes the entire group - with image_sas_url, set image_resource_group so the staged image survives."
+}
+
+variable "image_resource_group" {
+  type        = string
+  default     = ""
+  description = "Resource group for the SAS-staged image (auto-created by the staging script if missing). Empty = the deployment resource_group. Required when create_resource_group = true and image_sas_url is set, so destroy does not delete the reusable image."
+}
+
 variable "dsx_static_ips" {
   type        = list(string)
   default     = []

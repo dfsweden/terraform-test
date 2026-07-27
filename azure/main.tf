@@ -11,9 +11,25 @@
 # pre-flight without creating anything.
 # ============================================================
 
-# --- Existing resources ---
+# --- Resource group: existing by default, created on request ---
+resource "azurerm_resource_group" "this" {
+  count = var.create_resource_group ? 1 : 0
+
+  name     = var.resource_group
+  location = var.location
+  tags     = local.tags
+}
+
 data "azurerm_resource_group" "this" {
+  count = var.create_resource_group ? 0 : 1
+
   name = var.resource_group
+}
+
+locals {
+  # Referencing this local (not var.resource_group) gives every resource an
+  # implicit dependency on the created group.
+  resource_group = var.create_resource_group ? one(azurerm_resource_group.this[*].name) : one(data.azurerm_resource_group.this[*].name)
 }
 
 data "azurerm_subnet" "data" {
@@ -81,16 +97,18 @@ check "preflight_warnings" {
 }
 
 # --- Optional: build the boot image from a customer-delivered VHD SAS URL ---
-# Stages the .vhd (server-side copy) into a storage account in the deployment
-# RG and wraps it in a managed image the VMs boot from. CREATE-ONLY: destroy
-# keeps the image and staged VHD so apply/destroy cycles of the product never
-# re-download - the idempotent staging script no-ops when the image exists.
+# Stages the .vhd (server-side copy) into a storage account and wraps it in a
+# managed image the VMs boot from. CREATE-ONLY: destroy keeps the image so
+# apply/destroy cycles of the product never re-download - the idempotent
+# staging script no-ops when the image exists. With create_resource_group,
+# set image_resource_group (script auto-creates it) so the image lives
+# outside the group that destroy deletes.
 module "image_from_sas" {
   count  = var.image_sas_url != "" ? 1 : 0
   source = "./modules/image-from-vhd"
 
   location       = local.location
-  resource_group = var.resource_group
+  resource_group = var.image_resource_group != "" ? var.image_resource_group : local.resource_group
   sas_url        = var.image_sas_url
   tags           = local.tags
 
@@ -113,7 +131,7 @@ resource "azurerm_network_security_group" "this" {
 
   name                = "${local.prefix}NetSecGroup"
   location            = local.location
-  resource_group_name = var.resource_group
+  resource_group_name = local.resource_group
   tags                = local.tags
 
   security_rule {
@@ -137,7 +155,7 @@ resource "azurerm_proximity_placement_group" "this" {
 
   name                = "${local.prefix}PPG"
   location            = local.location
-  resource_group_name = var.resource_group
+  resource_group_name = local.resource_group
   tags                = local.tags
 }
 
@@ -145,7 +163,7 @@ data "azurerm_proximity_placement_group" "existing" {
   count = var.use_proximity_placement_group && var.proximity_placement_group_name != "" ? 1 : 0
 
   name                = var.proximity_placement_group_name
-  resource_group_name = var.resource_group
+  resource_group_name = local.resource_group
 }
 
 resource "azurerm_availability_set" "anvil" {
@@ -153,7 +171,7 @@ resource "azurerm_availability_set" "anvil" {
 
   name                         = "${local.prefix}AnvilAvailSet"
   location                     = local.location
-  resource_group_name          = var.resource_group
+  resource_group_name          = local.resource_group
   platform_fault_domain_count  = 2
   managed                      = true
   proximity_placement_group_id = local.ppg_id
@@ -165,7 +183,7 @@ resource "azurerm_availability_set" "dsx" {
 
   name                         = "${local.prefix}DSXAvailSet"
   location                     = local.location
-  resource_group_name          = var.resource_group
+  resource_group_name          = local.resource_group
   platform_fault_domain_count  = 2
   managed                      = true
   proximity_placement_group_id = local.ppg_id
@@ -176,7 +194,7 @@ data "azurerm_availability_set" "existing" {
   count = var.availability_set_name != "" ? 1 : 0
 
   name                = var.availability_set_name
-  resource_group_name = var.resource_group
+  resource_group_name = local.resource_group
 }
 
 # --- Anvil ---
@@ -186,7 +204,7 @@ module "anvil_standalone" {
 
   prefix                   = local.prefix
   location                 = local.location
-  resource_group           = var.resource_group
+  resource_group           = local.resource_group
   data_subnet_id           = data.azurerm_subnet.data.id
   nsg_id                   = local.nsg_id
   image_id                 = local.image_id_effective
@@ -216,7 +234,7 @@ module "anvil_ha" {
 
   prefix              = local.prefix
   location            = local.location
-  resource_group      = var.resource_group
+  resource_group      = local.resource_group
   data_subnet_id      = data.azurerm_subnet.data.id
   ha_subnet_id        = one(data.azurerm_subnet.ha[*].id)
   subnet_prefixlen    = local.data_subnet_prefixlen
@@ -252,7 +270,7 @@ module "dsx" {
   node_count          = var.dsx_count
   prefix              = local.prefix
   location            = local.location
-  resource_group      = var.resource_group
+  resource_group      = local.resource_group
   data_subnet_id      = data.azurerm_subnet.data.id
   nsg_id              = local.nsg_id
   image_id            = local.image_id_effective

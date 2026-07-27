@@ -11,15 +11,22 @@ az login
 az account set --subscription "<SUBSCRIPTION_NAME_OR_ID>"
 ```
 
-## 2. Create the network (the deployment expects it to pre-exist)
+## 2. Create the network (the deployment expects the VNet to pre-exist)
 
 ```bash
 LOC=westus2   # any region; must match where you deploy
-az group create -n hs-test-rg -l $LOC
-az network vnet create -g hs-test-rg -n hs-test-vnet \
+az group create -n hs-net-rg -l $LOC
+az network vnet create -g hs-net-rg -n hs-test-vnet \
   --address-prefix 10.10.0.0/16 \
   --subnet-name data --subnet-prefix 10.10.1.0/24
 ```
+
+The deployment resource group itself does NOT need to pre-exist - set
+`create_resource_group = true` (plus `location` and
+`virtual_network_resource_group`) and Terraform creates it. Note that
+`terraform destroy` then deletes that whole group, so with the SAS-URL image
+flow also set `image_resource_group` (auto-created) to keep the staged image
+outside it.
 
 HA mode additionally needs a small dedicated heartbeat subnet:
 
@@ -46,11 +53,15 @@ it, so repeated apply/destroy cycles skip the 30+ GB download.
 Copy `examples/sa-customer-sas.tfvars`, fill in:
 
 ```hcl
-resource_group       = "hs-test-rg"
-virtual_network_name = "hs-test-vnet"
-data_subnet_name     = "data"
-image_sas_url        = "<BLOB_SAS_URL>"   # or image_id from step 3
-admin_password       = "<PICK_A_PASSWORD>"
+resource_group                 = "hs-test-rg"     # created for you:
+create_resource_group          = true
+location                       = "westus2"
+virtual_network_resource_group = "hs-net-rg"
+virtual_network_name           = "hs-test-vnet"
+data_subnet_name               = "data"
+image_sas_url                  = "<BLOB_SAS_URL>" # or image_id from step 3
+image_resource_group           = "hs-images-rg"   # keeps the image across destroys
+admin_password                 = "<PICK_A_PASSWORD>"
 ```
 
 Then:

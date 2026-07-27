@@ -5,7 +5,7 @@ locals {
   creates_anvil = !local.is_dsx_only
 
   prefix   = var.name
-  location = var.location != "" ? var.location : data.azurerm_resource_group.this.location
+  location = var.location != "" ? var.location : one(data.azurerm_resource_group.this[*].location)
   # ARM: domain = concat(name, '.azure')
   domain = "${local.prefix}.azure"
 

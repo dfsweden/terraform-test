@@ -11,6 +11,21 @@ resource "terraform_data" "validate_inputs" {
     }
 
     precondition {
+      condition     = !var.create_resource_group || var.location != ""
+      error_message = "create_resource_group = true needs location (the region cannot be inherited from a group that does not exist yet)."
+    }
+
+    precondition {
+      condition     = !var.create_resource_group || var.virtual_network_resource_group != ""
+      error_message = "create_resource_group = true needs virtual_network_resource_group: the pre-existing VNet cannot live in the group being created."
+    }
+
+    precondition {
+      condition     = !(var.create_resource_group && var.image_sas_url != "" && var.image_resource_group == "")
+      error_message = "With create_resource_group and image_sas_url, set image_resource_group (auto-created if missing): otherwise destroy deletes the resource group INCLUDING the staged image, forcing a re-download on the next apply."
+    }
+
+    precondition {
       condition     = !local.is_ha || (length(trimspace(var.ha_subnet_name)) > 0 && !startswith(trimspace(var.ha_subnet_name), "<"))
       error_message = "ha mode needs ha_subnet_name: a dedicated HA heartbeat subnet (a /29 is recommended, not shared with other instances) for each Anvil's second NIC."
     }
