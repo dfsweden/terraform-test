@@ -118,6 +118,38 @@ owner = "<your-name>"   # tagged onto every resource
 | 6 | `image_resource_group` | Where the reusable image lives (created for you) | `hs-images-rg` |
 | 7 | `admin_password` | Cluster `admin` login password | — |
 
+### Alternative to (5)+(6): stage the image ahead of time
+
+Instead of giving Terraform the SAS URL, you can run the copy yourself,
+once, before ever touching Terraform — useful when the SAS link is about to
+expire, or when several deployments will share one image:
+
+```bash
+./scripts/stage-hammerspace-image.sh \
+    -u "<BLOB_SAS_URL>" \
+    -g hs-images-rg -l westus2
+```
+
+The script (it runs as-is in Azure Cloud Shell) creates the group and a
+small staging storage account if needed, performs the same server-side
+copy, wraps the VHD in a managed image, and prints the line to use:
+
+```
+image_id = "/subscriptions/.../resourceGroups/hs-images-rg/providers/Microsoft.Compute/images/Hammerspace-<version>"
+```
+
+In your vars file, use that instead of the SAS values — replace CHANGE (5)
+and (6) with:
+
+```hcl
+image_id = "<the line the script printed>"
+```
+
+Re-running the script is always safe: if the image already exists it just
+prints the `image_id` again and exits in about a second. Add `-d` to delete
+the intermediate `.vhd` blob after the image is created (the image is
+self-contained), or `-n <name>` to name the image yourself.
+
 ## Step 4 — Dry run, then deploy
 
 ```bash
@@ -138,7 +170,8 @@ What you'll see, in order:
 
 1. **Image staging** (first time only, ≈ 5–15 min): the VHD is copied
    server-side into `hs-images-rg` and becomes a managed image. Later
-   applies find the image in about a second.
+   applies find the image in about a second. (Skipped entirely if you
+   staged ahead of time with the script and set `image_id`.)
 2. **VMs boot** (≈ 15 min): each VM's first boot runs the Hammerspace
    non-interactive installer; the apply waits until the cluster API
    answers, then tags every VM with the cluster ID.
