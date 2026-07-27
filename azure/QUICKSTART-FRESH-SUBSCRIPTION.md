@@ -156,9 +156,12 @@ under Infrastructure as it finishes joining.
 terraform destroy -var-file=my-test.tfvars
 ```
 
-This deletes the cluster **and** `hs-test-rg` (Terraform created it), using
-forced VM deletion — no waiting on guest shutdowns. It deliberately does
-**not** touch:
+This deletes the cluster **and** `hs-test-rg` — but only because Terraform
+created that group (`create_resource_group = true`). If you deploy into a
+**pre-existing** group instead (`create_resource_group = false`, the
+default), destroy removes only the resources it created and never deletes
+the group itself. VM deletion is forced — no waiting on guest shutdowns.
+Destroy deliberately does **not** touch:
 
 - `hs-images-rg` — the staged image, so the next apply skips the download;
 - `hs-net-rg` — your network.

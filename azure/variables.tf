@@ -334,7 +334,7 @@ variable "availability_set_name" {
 variable "create_resource_group" {
   type        = bool
   default     = false
-  description = "Create resource_group instead of requiring it to exist (location must be set). CAUTION: destroy then deletes the entire group - with image_sas_url, set image_resource_group so the staged image survives."
+  description = "Create resource_group instead of requiring it to exist (location must be set). Ownership follows creation: destroy deletes the group ONLY when Terraform created it - a pre-existing group is never touched (and pointing this at an existing group fails at apply rather than adopting it). With image_sas_url, set image_resource_group so the staged image survives the group. NEVER flip this on a live deployment: changing true->false makes the next apply DELETE the created group and everything in it - destroy first, then change it."
 }
 
 variable "image_resource_group" {
