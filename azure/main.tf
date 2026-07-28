@@ -155,7 +155,9 @@ resource "azurerm_network_security_group" "this" {
 resource "azurerm_storage_account" "diag" {
   count = var.boot_diagnostics ? 1 : 0
 
-  name                     = "hsdiag${substr(sha1("${local.resource_group}-${local.location}"), 0, 16)}"
+  # Prefix in the hash: multiple deployments (e.g. a dsx add) share a
+  # resource group, and each needs its own diagnostics account.
+  name                     = "hsdiag${substr(sha1("${local.resource_group}-${local.location}-${local.prefix}"), 0, 16)}"
   resource_group_name      = local.resource_group
   location                 = local.location
   account_tier             = "Standard"
