@@ -40,10 +40,9 @@ terraform apply -var-file=examples/<example>.tfvars
 
 | | AWS (`aws/`) | Azure (`azure/`) |
 |---|---|---|
-| Reference | CloudFormation template / Ansible playbooks | Marketplace ARM template |
 | HA cluster IP | Secondary private IP on the Anvil ENI (single-AZ) or overlay IP + route rewriting (multi-AZ) | **Internal Standard Load Balancer** frontend IP, HA-ports rule + floating IP, TCP 4505 probe picks the active node |
 | HA network | One eth0 (data+mgmt+ha) | eth0 (data/mgmt) + **eth1 on a dedicated HA subnet** |
-| Cross-AZ | `ha-multi-az` mode (overlay IP, NLB, route tables) | Not applicable — availability set (fault domains) covers the reference design |
+| Cross Availability Zone | `ha-multi-az` mode (overlay IP, NLB, route tables) | Not applicable — availability set (fault domains) covers the reference design |
 | Runtime cloud IAM | Instance profile (peer discovery, IP moves, route writes) | **None needed** — failover is LB-probe-driven |
 | Admin password | The Primary Anvil's EC2 instance ID | Your `admin_password`, applied via the `hs-init-admin-pw` extension |
 | Image | `hs_ami` (AMI with `hs_version` tag) | `image_id` (managed/SIG image) or Marketplace image + plan |
@@ -57,7 +56,7 @@ same `:8443` REST API, and tag with the same `HammerspaceClusterId`.
 ## Prerequisites (both clouds)
 
 - Terraform ≥ 1.6, python3, curl, bash on the machine running Terraform
-- The cloud CLI: `aws` (AWS) / `az`, logged in (Azure)
+- The cloud CLI: `aws` (AWS) / `az` (Azure) - logged in
 - Network path from this machine to the Anvil's `:8443` for the post-deploy
   wait + cluster-ID tagging (set `wait_for_cluster = false` if unavailable)
 
