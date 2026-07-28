@@ -347,8 +347,8 @@ variable "image_resource_group" {
 
 variable "boot_diagnostics" {
   type        = bool
-  default     = true
-  description = "Capture boot diagnostics (serial console/boot log) for every VM in a small LRS storage account - the only way to see why a node never came up."
+  default     = false
+  description = "Capture boot diagnostics (serial console/boot log) for every VM in a small LRS storage account - the only way to see why a node never came up. Off by default; turn on when troubleshooting deployments."
 }
 
 variable "cluster_api_wait_retries" {
