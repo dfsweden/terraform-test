@@ -144,6 +144,18 @@ def check_vm_sizes(q):
                 caps = {c.get("name"): c.get("value") for c in match.get("capabilities", [])}
                 if str(caps.get("PremiumIO", "")).lower() != "true":
                     errors.append(f"VM size {size} does not support premium storage, but a premium disk type was selected for it.")
+            # Hammerspace VHDs are Hyper-V Generation 1; Gen2-only sizes
+            # (Mv2, ARM64, confidential-computing series, ...) cannot boot
+            # them and fail at VM creation - catch it here instead.
+            image_gen = (q.get("image_generation") or "").strip()
+            if image_gen:
+                caps = {c.get("name"): c.get("value") for c in match.get("capabilities", [])}
+                hv_gens = [g.strip() for g in str(caps.get("HyperVGenerations", "")).split(",") if g.strip()]
+                if hv_gens and image_gen not in hv_gens:
+                    errors.append(
+                        f"VM size {size} only boots Hyper-V generation {'/'.join(hv_gens)} images, but the "
+                        f"Hammerspace image is Generation {image_gen.lstrip('V')} ({image_gen}) - pick a size "
+                        f"that supports {image_gen} (most D/E/F-series sizes do).")
 
         # Product minimums: Anvil 16 vCPU / 32 GiB, DSX 8 vCPU / 16 GiB.
         for role, size_key, vcpu_key, mem_key, dflt_vcpus, dflt_mem in (

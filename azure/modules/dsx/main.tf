@@ -94,6 +94,7 @@ module "vm" {
   os_disk_type        = var.boot_disk_type
   data_disks          = local.data_disks
   custom_data         = local.custom_data[each.key]
+  diag_storage_uri    = var.diag_storage_uri
   admin_username      = var.admin_username
   admin_password      = var.admin_password
   tags                = var.tags

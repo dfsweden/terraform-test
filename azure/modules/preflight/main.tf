@@ -44,6 +44,7 @@ data "external" "preflight" {
     dsx_min_vcpus    = tostring(var.dsx_min_vcpus)
     dsx_min_mem_gb   = tostring(var.dsx_min_mem_gb)
     image_id         = var.image_id
+    image_generation = var.image_generation
     image_sas_url    = var.image_sas_url
     check_anvil      = var.check_anvil ? "true" : "false"
     anvil_ip         = var.anvil_ip

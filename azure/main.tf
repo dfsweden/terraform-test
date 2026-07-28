@@ -151,6 +151,23 @@ resource "azurerm_network_security_group" "this" {
   depends_on = [terraform_data.validate_inputs]
 }
 
+# --- Boot diagnostics (serial console/boot log for every VM) ---
+resource "azurerm_storage_account" "diag" {
+  count = var.boot_diagnostics ? 1 : 0
+
+  name                     = "hsdiag${substr(sha1("${local.resource_group}-${local.location}"), 0, 16)}"
+  resource_group_name      = local.resource_group
+  location                 = local.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  min_tls_version          = "TLS1_2"
+  tags                     = local.tags
+}
+
+locals {
+  diag_storage_uri = var.boot_diagnostics ? one(azurerm_storage_account.diag[*].primary_blob_endpoint) : ""
+}
+
 # --- Placement (ARM: PPG + availability sets, fault domain count 2) ---
 resource "azurerm_proximity_placement_group" "this" {
   count = var.use_proximity_placement_group && var.proximity_placement_group_name == "" ? 1 : 0
@@ -225,6 +242,7 @@ module "anvil_standalone" {
   admin_username           = local.admin_username
   admin_password           = var.admin_password
   domain                   = local.domain
+  diag_storage_uri         = local.diag_storage_uri
   tags                     = local.tags
 
   depends_on = [terraform_data.validate_inputs, module.preflight]
@@ -256,6 +274,7 @@ module "anvil_ha" {
   admin_username      = local.admin_username
   admin_password      = var.admin_password
   domain              = local.domain
+  diag_storage_uri    = local.diag_storage_uri
   tags                = local.tags
 
   depends_on = [terraform_data.validate_inputs, module.preflight]
@@ -294,6 +313,7 @@ module "dsx" {
   admin_username      = local.admin_username
   admin_password      = var.admin_password
   domain              = local.domain
+  diag_storage_uri    = local.diag_storage_uri
   tags                = local.tags
 
   depends_on = [terraform_data.validate_inputs, module.preflight]
@@ -306,10 +326,11 @@ module "cluster_tag" {
   count  = var.wait_for_cluster && length(local.all_vm_ids) > 0 ? 1 : 0
   source = "../shared/cluster-tag"
 
-  endpoint = local.anvil_mgmt_endpoint
-  hsuser   = var.hsuser
-  password = var.admin_password
-  triggers = local.all_vm_ids
+  endpoint     = local.anvil_mgmt_endpoint
+  hsuser       = var.hsuser
+  password     = var.admin_password
+  triggers     = local.all_vm_ids
+  wait_retries = var.cluster_api_wait_retries
   tag_command = join("; ", [
     for id in local.all_vm_ids :
     "az tag update --operation Merge --resource-id '${id}' --tags '${var.cluster_id_tag_key}=__CLUSTER_ID__' --output none"

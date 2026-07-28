@@ -76,8 +76,9 @@ module "vm" {
       throughput = var.metadata_disk_throughput
     }
   ]
-  custom_data    = local.custom_data
-  admin_username = var.admin_username
-  admin_password = var.admin_password
-  tags           = var.tags
+  custom_data      = local.custom_data
+  diag_storage_uri = var.diag_storage_uri
+  admin_username   = var.admin_username
+  admin_password   = var.admin_password
+  tags             = var.tags
 }

@@ -108,3 +108,9 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "diag_storage_uri" {
+  type        = string
+  default     = ""
+  description = "Blob endpoint for boot diagnostics (empty = disabled)."
+}

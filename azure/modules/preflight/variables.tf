@@ -60,6 +60,12 @@ variable "image_id" {
   description = "Image resource ID to verify (empty for marketplace images)."
 }
 
+variable "image_generation" {
+  type        = string
+  default     = "V1"
+  description = "Hyper-V generation of the Hammerspace image; every chosen VM size must support it (empty = skip the check)."
+}
+
 variable "image_sas_url" {
   type        = string
   default     = ""

@@ -345,6 +345,18 @@ variable "image_resource_group" {
   description = "Resource group for the SAS-staged image (auto-created by the staging script if missing). Empty = the deployment resource_group. Required when create_resource_group = true and image_sas_url is set, so destroy does not delete the reusable image."
 }
 
+variable "boot_diagnostics" {
+  type        = bool
+  default     = true
+  description = "Capture boot diagnostics (serial console/boot log) for every VM in a small LRS storage account - the only way to see why a node never came up."
+}
+
+variable "cluster_api_wait_retries" {
+  type        = number
+  default     = 120
+  description = "Attempts (x10s) the post-deploy tagging waits for the management API. 120 = 20 minutes."
+}
+
 variable "anvil_node_ips" {
   type        = list(string)
   default     = []

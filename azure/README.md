@@ -94,6 +94,10 @@ The plan fails before creating anything when:
 - the Azure CLI is not logged in;
 - a chosen VM size doesn't exist (or is restricted) in the location, or a
   `Premium_LRS` disk was selected on a size without premium-storage support;
+- a chosen VM size is **Hyper-V Generation 2-only** (the whole v6/v7 series,
+  Mv2, ARM64, confidential-computing sizes…) — Hammerspace images are
+  Generation 1 and cannot boot on them; sizes supporting both generations
+  pass;
 - a node is below the product minimum — Anvil 16 vCPU / 32 GiB, DSX 8 vCPU /
   16 GiB (SKU capability check), or a boot disk is under 512 GB (variable
   validation);

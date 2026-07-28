@@ -85,6 +85,15 @@ resource "azurerm_virtual_machine" "this" {
     disable_password_authentication = false
   }
 
+  # Serial-console/boot log capture - invaluable when a node never comes up.
+  dynamic "boot_diagnostics" {
+    for_each = var.diag_storage_uri != "" ? [1] : []
+    content {
+      enabled     = true
+      storage_uri = var.diag_storage_uri
+    }
+  }
+
   # ARM: ultraSSDEnabled when an Ultra disk type is selected.
   additional_capabilities {
     ultra_ssd_enabled = local.ultra_ssd

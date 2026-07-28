@@ -199,8 +199,9 @@ module "vm" {
   data_disks = [
     { lun = 1, size = var.metadata_disk_size, type = var.metadata_disk_type }
   ]
-  custom_data    = local.custom_data[each.key]
-  admin_username = var.admin_username
-  admin_password = var.admin_password
-  tags           = var.tags
+  custom_data      = local.custom_data[each.key]
+  diag_storage_uri = var.diag_storage_uri
+  admin_username   = var.admin_username
+  admin_password   = var.admin_password
+  tags             = var.tags
 }

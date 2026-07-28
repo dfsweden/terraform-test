@@ -84,6 +84,12 @@ variable "admin_password" {
   sensitive = true
 }
 
+variable "diag_storage_uri" {
+  type        = string
+  default     = ""
+  description = "Blob endpoint of a storage account for boot diagnostics (empty = disabled)."
+}
+
 variable "tags" {
   type    = map(string)
   default = {}

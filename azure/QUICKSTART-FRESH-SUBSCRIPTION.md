@@ -214,5 +214,6 @@ az group delete -n hs-net-rg --yes
 |---|---|
 | `plan` fails on `image_sas_url` | SAS expired or mispasted — ask Hammerspace for a fresh link. Note: the URL must NOT be IP-restricted (Azure Storage performs the copy, not your machine). |
 | `plan` fails on a VM size | That size isn't offered in your region — pick another region, or another size meeting the minimums (Anvil 16 vCPU / 32 GiB, DSX 8 vCPU / 16 GiB). |
+| `plan` says the size "only boots Hyper-V generation V2 images" | The Hammerspace image is Generation 1; the newest VM series (v6/v7, ARM64, confidential) are Gen2-only. Use a size listing V1 support — the defaults in this guide do. |
 | `apply` succeeds but you can't open `:8443` | No network path: set `public_ip_addresses = true` for the test, or run from a machine that can reach the VNet. Ping never works (ICMP is not in the security group) — test the port instead. |
 | First boot seems stuck > 25 min | Check the VM isn't stopped (`az vm list -g hs-test-rg -d -o table`) — some corporate subscriptions run automation that powers off unrecognized VMs. |
