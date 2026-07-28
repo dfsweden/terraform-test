@@ -1,7 +1,5 @@
 # Hammerspace Terraform — Architecture Overview
 
-*Updated 2026-07-24.*
-
 Multi-cloud Terraform that provisions Hammerspace **Anvil** (metadata) and
 **DSX** (data-services) clusters. Each cloud root is a faithful port of that
 cloud's product reference, sharing one execution pipeline and the
