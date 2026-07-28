@@ -17,10 +17,10 @@ resource_group       = "<YOUR_RESOURCE_GROUP>"
 virtual_network_name = "<YOUR_VNET_NAME>"
 # virtual_network_resource_group = ""   # set if the VNet lives elsewhere
 data_subnet_name = "<YOUR_DATA_SUBNET>"
-# The HA heartbeat runs on the data subnet by default - no dedicated
-# heartbeat subnet is needed. To match the legacy marketplace-template
-# layout instead (second NIC per Anvil on a dedicated /29), set:
-# ha_subnet_name = "<YOUR_HA_SUBNET>"
+# Dedicated HA heartbeat subnet - REQUIRED. Each Anvil gets a second NIC
+# (eth1) here, and the subnet is how the two Anvils DISCOVER each other.
+# Must not be shared with any other instances; a /29 is recommended.
+ha_subnet_name = "<YOUR_HA_SUBNET>"
 
 # --- Hammerspace image (from Hammerspace; managed image or SIG version ID) ---
 image_id = "<YOUR_HAMMERSPACE_IMAGE_ID>"

@@ -11,12 +11,17 @@
 # rewriting, no IAM/identity requirements (the Azure delta vs
 # the AWS design).
 #
-# NICs: by DEFAULT each Anvil has a single eth0 carrying
-# data + mgmt + ha - the product does not need a dedicated
-# heartbeat network (same as the AWS reference). Setting
-# ha_subnet_id switches to the legacy marketplace-template
-# layout: eth0 = data/mgmt, eth1 = heartbeat on the dedicated
-# subnet.
+# NICs: eth0 = data/mgmt (LB pool), eth1 = HA heartbeat on a
+# dedicated subnet. The heartbeat subnet is REQUIRED on Azure:
+# it is the peer-DISCOVERY mechanism, not just a heartbeat
+# link. The product's Azure provisioning (pd/prov/azure.py)
+# hard-codes node_idx=0 and cannot consume the nodes-map /
+# node_index pattern AWS uses for single-NIC pairing - two
+# single-NIC Anvils never find each other (verified live
+# 2026-07-28: clean 60-min run, both nodes healthy, no
+# pairing). The module still ACCEPTS ha_subnet_id = null for
+# a future image that supports node_index, but the root
+# validation requires the subnet today.
 #
 # ARM quirk kept on purpose: Anvil1 boots ha_mode=Secondary and
 # Anvil2 boots ha_mode=Primary (hostnames <prefix>Anvil and

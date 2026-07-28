@@ -24,11 +24,12 @@ load balancer — availability zones are not part of the design.
   probe-driven: no cloud API calls, no route rewriting, and therefore **no
   managed identity / instance profile requirement** (the AWS runtime-IAM
   pre-flight has no Azure counterpart because the product doesn't need it).
-- Each HA Anvil has a **single NIC** by default: `eth0` carries data, mgmt,
-  and the HA heartbeat (same as the AWS reference — the product needs no
-  dedicated heartbeat network). Setting `ha_subnet_name` opts into the
-  legacy marketplace-template layout: `eth0` (data/mgmt) + `eth1`
-  (heartbeat) on a dedicated /29 not shared with anything else.
+- Each HA Anvil has **two NICs**: `eth0` (data/mgmt, in the LB pool) and
+  `eth1` (heartbeat) on a **dedicated HA subnet** (`ha_subnet_name`, a /29
+  not shared with anything else). The dedicated subnet is not optional on
+  Azure — it is how the two Anvils **discover each other**: the image's
+  Azure provisioning path has no `node_index` support, so the AWS-style
+  single-NIC layout cannot pair (verified live 2026-07-28).
 - ARM quirk kept for fidelity: Anvil1 boots `ha_mode: Secondary`, Anvil2
   boots `ha_mode: Primary`.
 - The **admin password is not the instance ID** (that's the AWS convention).
@@ -43,8 +44,9 @@ load balancer — availability zones are not part of the design.
 - **Azure CLI (logged in: `az login`) + python3 + curl + bash** on the machine
   running Terraform — they power the pre-flight, and the cluster-ID tagging.
 - **Existing resources**: a resource group (or `create_resource_group =
-  true`), a VNet, and a data subnet. The configuration creates NICs, NSG,
-  LB, availability sets, and VMs — not the network.
+  true`), a VNet, a data subnet, and (HA) a dedicated heartbeat subnet. The
+  configuration creates NICs, NSG, LB, availability sets, and VMs — not the
+  network.
 - **Hammerspace image** — exactly one of:
   - `image_id` — managed image or Shared Image Gallery version (shared by
     Hammerspace into this subscription/tenant);

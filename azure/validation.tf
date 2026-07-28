@@ -26,8 +26,8 @@ resource "terraform_data" "validate_inputs" {
     }
 
     precondition {
-      condition     = !startswith(trimspace(var.ha_subnet_name), "<")
-      error_message = "ha_subnet_name is still a <PLACEHOLDER>. Leave it empty (default: HA heartbeat on eth0, no dedicated subnet needed) or name a real dedicated heartbeat subnet for the legacy dual-NIC layout."
+      condition     = !local.is_ha || (length(trimspace(var.ha_subnet_name)) > 0 && !startswith(trimspace(var.ha_subnet_name), "<"))
+      error_message = "ha mode needs ha_subnet_name: a dedicated HA heartbeat subnet (a /29, not shared with other instances). On Azure the heartbeat subnet IS the peer-discovery mechanism - the product's Azure provisioning has no node_index support, so single-NIC HA cannot pair (verified 2026-07-28)."
     }
 
     precondition {

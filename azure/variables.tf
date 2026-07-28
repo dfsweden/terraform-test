@@ -87,11 +87,11 @@ variable "ha_subnet_name" {
   type        = string
   default     = ""
   description = <<-EOT
-    ha mode, OPTIONAL: a dedicated High-Availability heartbeat subnet. Empty
-    (default) = the HA heartbeat runs on eth0 with data/mgmt - no extra
-    subnet needed. Set to an existing subnet name for the legacy
-    marketplace-template layout (each Anvil gets a second NIC / eth1 there;
-    not shared with other instances, a /29 recommended).
+    ha mode: existing dedicated High-Availability heartbeat subnet (each
+    Anvil gets a second NIC / eth1 there; not shared with other instances,
+    a /29 recommended). REQUIRED on Azure: the heartbeat subnet is the HA
+    peer-discovery mechanism - the image's Azure provisioning path has no
+    node_index support, so heartbeat-on-eth0 (the AWS layout) cannot pair.
   EOT
 }
 
