@@ -11,8 +11,12 @@
 # rewriting, no IAM/identity requirements (the Azure delta vs
 # the AWS design).
 #
-# Each Anvil has TWO NICs: eth0 = data/mgmt on the data subnet
-# (in the LB pool), eth1 = HA heartbeat on a dedicated subnet.
+# NICs: by DEFAULT each Anvil has a single eth0 carrying
+# data + mgmt + ha - the product does not need a dedicated
+# heartbeat network (same as the AWS reference). Setting
+# ha_subnet_id switches to the legacy marketplace-template
+# layout: eth0 = data/mgmt, eth1 = heartbeat on the dedicated
+# subnet.
 #
 # ARM quirk kept on purpose: Anvil1 boots ha_mode=Secondary and
 # Anvil2 boots ha_mode=Primary (hostnames <prefix>Anvil and
@@ -67,13 +71,17 @@ resource "azurerm_lb_rule" "ha_ports" {
 locals {
   cluster_ip = var.cluster_ip != "" ? var.cluster_ip : azurerm_lb.cluster.private_ip_address
 
+  # Dedicated heartbeat network only when a subnet was supplied (legacy
+  # marketplace-template layout); default is heartbeat-on-eth0.
+  dual_nic = var.ha_subnet_id != null && var.ha_subnet_id != ""
+
   nodes = {
     "1" = { computer_name = "${var.prefix}Anvil", ha_mode = "Secondary" }
     "2" = { computer_name = "${var.prefix}Anvil-2", ha_mode = "Primary" }
   }
 
-  # ARM anvil1CustomData / anvil2CustomData (verbatim structure): eth0 carries
-  # the cluster IP with the data subnet's prefix length, eth1 is the HA link.
+  # eth0 carries the cluster IP with the data subnet's prefix length; the
+  # ha role rides on eth0 unless a dedicated heartbeat subnet adds eth1.
   custom_data = {
     for idx, node in local.nodes : idx => jsonencode({
       cluster = {
@@ -82,16 +90,20 @@ locals {
       node = {
         hostname = node.computer_name
         ha_mode  = node.ha_mode
-        networks = {
-          eth0 = {
-            cluster_ips = ["${local.cluster_ip}/${var.subnet_prefixlen}"]
-            roles       = ["data", "mgmt"]
-          }
-          eth1 = {
-            dhcp  = true
-            roles = ["ha"]
-          }
-        }
+        networks = merge(
+          {
+            eth0 = {
+              cluster_ips = ["${local.cluster_ip}/${var.subnet_prefixlen}"]
+              roles       = local.dual_nic ? ["data", "mgmt"] : ["data", "mgmt", "ha"]
+            }
+          },
+          local.dual_nic ? {
+            eth1 = {
+              dhcp  = true
+              roles = ["ha"]
+            }
+          } : {}
+        )
       }
     })
   }
@@ -121,13 +133,14 @@ resource "azurerm_network_interface" "data" {
     name                          = "ipconfig1"
     primary                       = true
     subnet_id                     = var.data_subnet_id
-    private_ip_address_allocation = "Dynamic"
+    private_ip_address_allocation = length(var.node_ips) >= tonumber(each.key) ? "Static" : "Dynamic"
+    private_ip_address            = length(var.node_ips) >= tonumber(each.key) ? var.node_ips[tonumber(each.key) - 1] : null
     public_ip_address_id          = var.public_ip ? azurerm_public_ip.anvil[each.key].id : null
   }
 }
 
 resource "azurerm_network_interface" "ha" {
-  for_each = local.nodes
+  for_each = local.dual_nic ? local.nodes : {}
 
   name                = "${var.prefix}Anvil${each.key}HaIface"
   location            = var.location
@@ -149,7 +162,7 @@ resource "azurerm_network_interface_security_group_association" "data" {
 }
 
 resource "azurerm_network_interface_security_group_association" "ha" {
-  for_each = local.nodes
+  for_each = local.dual_nic ? local.nodes : {}
 
   network_interface_id      = azurerm_network_interface.ha[each.key].id
   network_security_group_id = var.nsg_id
@@ -168,11 +181,14 @@ module "vm" {
   source   = "../hs-vm"
   for_each = local.nodes
 
-  name                = "${var.prefix}Anvil${each.key}"
-  computer_name       = each.value.computer_name
-  location            = var.location
-  resource_group      = var.resource_group
-  nic_ids             = [azurerm_network_interface.data[each.key].id, azurerm_network_interface.ha[each.key].id]
+  name           = "${var.prefix}Anvil${each.key}"
+  computer_name  = each.value.computer_name
+  location       = var.location
+  resource_group = var.resource_group
+  nic_ids = concat(
+    [azurerm_network_interface.data[each.key].id],
+    local.dual_nic ? [azurerm_network_interface.ha[each.key].id] : [],
+  )
   instance_type       = var.instance_type
   availability_set_id = var.availability_set_id
   ppg_id              = var.ppg_id

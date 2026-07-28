@@ -38,8 +38,10 @@ data "azurerm_subnet" "data" {
   resource_group_name  = local.vnet_resource_group
 }
 
+# Only looked up when a dedicated heartbeat subnet is requested (legacy
+# dual-NIC layout) - HA works on the data subnet alone by default.
 data "azurerm_subnet" "ha" {
-  count = local.is_ha ? 1 : 0
+  count = local.is_ha && var.ha_subnet_name != "" ? 1 : 0
 
   name                 = var.ha_subnet_name
   virtual_network_name = var.virtual_network_name
@@ -237,6 +239,7 @@ module "anvil_ha" {
   resource_group      = local.resource_group
   data_subnet_id      = data.azurerm_subnet.data.id
   ha_subnet_id        = one(data.azurerm_subnet.ha[*].id)
+  node_ips            = var.anvil_node_ips
   subnet_prefixlen    = local.data_subnet_prefixlen
   nsg_id              = local.nsg_id
   image_id            = local.image_id_effective

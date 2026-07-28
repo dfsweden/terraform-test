@@ -118,7 +118,7 @@ flowchart TB
             A2["Anvil2 (ha_mode Primary)\neth0"]
             DSX["Dsx1..N\n(created in parallel,\njoin retries via LB IP)"]
         end
-        subgraph hasub ["Dedicated HA subnet (/29)"]
+        subgraph hasub ["Optional dedicated HA subnet (/29, legacy layout via ha_subnet_name)"]
             H1["Anvil1 eth1 heartbeat"]
             H2["Anvil2 eth1 heartbeat"]
         end

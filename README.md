@@ -41,7 +41,7 @@ terraform apply -var-file=examples/<example>.tfvars
 | | AWS (`aws/`) | Azure (`azure/`) |
 |---|---|---|
 | HA cluster IP | Secondary private IP on the Anvil ENI (single-AZ) or overlay IP + route rewriting (multi-AZ) | **Internal Standard Load Balancer** frontend IP, HA-ports rule + floating IP, TCP 4505 probe picks the active node |
-| HA network | One eth0 (data+mgmt+ha) | eth0 (data/mgmt) + **eth1 on a dedicated HA subnet** |
+| HA network | One eth0 (data+mgmt+ha) | One eth0 (data+mgmt+ha) by default; optional legacy layout with eth1 on a dedicated HA subnet (`ha_subnet_name`) |
 | Cross Availability Zone | `ha-multi-az` mode (overlay IP, NLB, route tables) | Not applicable — availability set (fault domains) covers the reference design |
 | Runtime cloud IAM | Instance profile (peer discovery, IP moves, route writes) | **None needed** — failover is LB-probe-driven |
 | Admin password | The Primary Anvil's EC2 instance ID | Your `admin_password`, applied via the `hs-init-admin-pw` extension |

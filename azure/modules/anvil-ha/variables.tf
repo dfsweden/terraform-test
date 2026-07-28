@@ -16,7 +16,14 @@ variable "data_subnet_id" {
 
 variable "ha_subnet_id" {
   type        = string
-  description = "Dedicated HA heartbeat subnet (each Anvil's eth1). Not shared with other instances; a /29 is recommended."
+  default     = null
+  description = "OPTIONAL dedicated HA heartbeat subnet (each Anvil's eth1, legacy marketplace-template layout; a /29, not shared with other instances). Default null = heartbeat on eth0, no extra subnet."
+}
+
+variable "node_ips" {
+  type        = list(string)
+  default     = []
+  description = "Optional static private IPs for the Anvil data NICs, in node order; nodes beyond the list length stay dynamic."
 }
 
 variable "subnet_prefixlen" {

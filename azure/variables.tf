@@ -87,9 +87,11 @@ variable "ha_subnet_name" {
   type        = string
   default     = ""
   description = <<-EOT
-    ha mode only: existing High-Availability heartbeat subnet (each Anvil gets
-    a second NIC / eth1 here). This subnet cannot be shared with any other
-    instances; a /29 is recommended.
+    ha mode, OPTIONAL: a dedicated High-Availability heartbeat subnet. Empty
+    (default) = the HA heartbeat runs on eth0 with data/mgmt - no extra
+    subnet needed. Set to an existing subnet name for the legacy
+    marketplace-template layout (each Anvil gets a second NIC / eth1 there;
+    not shared with other instances, a /29 recommended).
   EOT
 }
 
@@ -341,6 +343,12 @@ variable "image_resource_group" {
   type        = string
   default     = ""
   description = "Resource group for the SAS-staged image (auto-created by the staging script if missing). Empty = the deployment resource_group. Required when create_resource_group = true and image_sas_url is set, so destroy does not delete the reusable image."
+}
+
+variable "anvil_node_ips" {
+  type        = list(string)
+  default     = []
+  description = "ha mode: optional static private IPs for the two Anvil data NICs (in node order); empty = dynamic."
 }
 
 variable "dsx_static_ips" {
