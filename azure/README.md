@@ -116,8 +116,10 @@ RBAC problems surface at apply time rather than pre-flight.
 
 ## Notable behavior (kept from the ARM template)
 
-- **Naming**: everything is prefixed with `name` — `<name>Anvil1`,
-  `<name>Anvil2`, `<name>Dsx1…N`, `<name>NetSecGroup`, `<name>LoadBalancer`,
+- **Naming**: everything is prefixed with `name` plus a per-deployment
+  5-char random tail (AWS parity — keeps each incarnation's resource IDs
+  unique so activity logs never splice deployments): `<name><rand>Anvil1`,
+  `<name><rand>Anvil2`, `<name><rand>Dsx1…N`, `<name><rand>NetSecGroup`, `<name><rand>LoadBalancer`,
   `<name>AnvilAvailSet` / `<name>DSXAvailSet`; hostnames `<name>Anvil`,
   `<name>Anvil-2`, `<name>Dsx<i>`; domain `<name>.azure`.
 - **NSG**: one Allow rule (priority 2000) with the explicit Hammerspace port

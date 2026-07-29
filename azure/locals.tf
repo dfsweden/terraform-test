@@ -4,7 +4,10 @@ locals {
   is_dsx_only   = var.deployment_mode == "dsx"
   creates_anvil = !local.is_dsx_only
 
-  prefix   = var.name
+  # <name> + per-deployment 5-char random tail (AWS parity): makes every
+  # incarnation's resource IDs unique, so Azure activity logs and monitoring
+  # never splice two deployments' histories together.
+  prefix   = "${var.name}${random_string.run_suffix.result}"
   location = var.location != "" ? var.location : one(data.azurerm_resource_group.this[*].location)
   # ARM: domain = concat(name, '.azure')
   domain = "${local.prefix}.azure"
@@ -137,4 +140,12 @@ locals {
     "30049", "41001-41256", "50000", "51000", "52000-52008", "53000-53008",
     "53030",
   ]
+}
+
+resource "random_string" "run_suffix" {
+  length  = 5
+  lower   = true
+  upper   = false
+  numeric = true
+  special = false
 }
