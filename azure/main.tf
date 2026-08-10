@@ -148,6 +148,24 @@ resource "azurerm_network_security_group" "this" {
     destination_port_ranges    = local.nsg_ports
   }
 
+  # ICMP for intra-cluster traffic (Anvil <-> DSX, both on the data subnet).
+  # Needs its OWN rule: ICMP carries no ports, so it can never match the
+  # port-scoped rule above. Sourced from the data subnet rather than the
+  # VirtualNetwork tag, which would also cover peered VNets and on-prem
+  # ranges reachable through the gateway. Ingress from outside the subnet
+  # stays denied - ping from a workstation still will not work.
+  security_rule {
+    name                       = "${local.prefix}NetSecGroup-rule-in-2010-icmp"
+    priority                   = 2010
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Icmp"
+    source_port_range          = "*"
+    destination_port_range     = "*"
+    source_address_prefixes    = data.azurerm_subnet.data.address_prefixes
+    destination_address_prefix = "*"
+  }
+
   depends_on = [terraform_data.validate_inputs]
 }
 

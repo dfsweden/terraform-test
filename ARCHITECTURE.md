@@ -129,7 +129,7 @@ flowchart TB
     A2 --- H2
     AS["Availability set (FD=2)\n+ optional PPG"] -.-> A1
     AS -.-> A2
-    NSG["NSG: explicit HS port list\n(no ICMP - ping never works)"] -.-> A1
+    NSG["NSG: explicit HS port list\n+ ICMP within the data subnet\n(ping works node-to-node,\nnot from outside the subnet)"] -.-> A1
     NSG -.-> A2
     NSG -.-> DSX
 ```
