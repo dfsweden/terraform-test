@@ -8,6 +8,12 @@
 locals {
   nodes = { for i in range(1, var.node_count + 1) : tostring(i) => i }
 
+  # ha-multi-az: Dsx1 -> zones[0], Dsx2 -> zones[1], ..., wrapping - so two
+  # zones and three nodes puts Dsx3 back beside Dsx1. null everywhere else,
+  # which is the availability-set placement.
+  zonal     = length(var.zones) > 0
+  node_zone = { for idx, i in local.nodes : idx => local.zonal ? var.zones[(i - 1) % length(var.zones)] : null }
+
   data_disks = [
     for j in range(var.data_disk_count) : {
       lun  = j
@@ -49,6 +55,7 @@ resource "azurerm_public_ip" "dsx" {
   resource_group_name = var.resource_group
   allocation_method   = "Static"
   sku                 = "Standard"
+  zones               = local.zonal ? [local.node_zone[each.key]] : null
   tags                = var.tags
 }
 
@@ -88,6 +95,7 @@ module "vm" {
   instance_type       = var.instance_type
   availability_set_id = var.availability_set_id
   ppg_id              = var.ppg_id
+  zone                = local.node_zone[each.key]
   image_id            = var.image_id
   marketplace_image   = var.marketplace_image
   os_disk_size        = var.boot_disk_size

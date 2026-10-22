@@ -98,6 +98,12 @@ variable "ppg_id" {
   default = null
 }
 
+variable "zones" {
+  type        = list(string)
+  default     = []
+  description = "ha-multi-az: zones the nodes are spread across, round-robin in node order (\"1\" | \"2\" | \"3\"). Empty = no zone (availability-set placement)."
+}
+
 variable "admin_username" {
   type = string
 }

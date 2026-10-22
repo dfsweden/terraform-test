@@ -42,18 +42,25 @@ data_subnet_name     = "<CUSTOMER_DATA_SUBNET>"
 # Pre-flight hard-stops if the URL is unreadable, expired, or not a page
 # blob - before anything is created.
 image_sas_url = "https://<account>.blob.core.windows.net/<container>/<image>.vhd?sp=r&st=...&sig=..."
+# Hyper-V generation to register the staged image as. The Hammerspace VHD
+# boots either way; the registration decides which VM sizes can use it.
+# V1 (default) boots Gen1 and dual-generation sizes (v5 and older).
+# V2 (UEFI) is required for Gen2-only sizes (every v6/v7 series); the
+# staged image is then named <image>-gen2. Pick once per image - the
+# generation of a registered image cannot be changed afterwards.
+# image_generation = "V2"
 
 # --- Credentials ---
 admin_password = "<CUSTOMER_ADMIN_PASSWORD>"
 
 # --- Anvil sizing (minimums enforced by pre-flight) ---
-anvil_instance_type      = "Standard_F16s_v2" # Anvil minimum is 16 vCPU / 32 GiB
+anvil_instance_type      = "Standard_D16s_v5" # Anvil minimum is 16 vCPU / 32 GiB
 anvil_boot_disk_size     = 512                # minimum 512 GB
 anvil_metadata_disk_size = 256
 
 # --- DSX (product minimum: 8 vCPU / 16 GiB) ---
 dsx_count           = 1
-dsx_instance_type   = "Standard_F8s_v2"
+dsx_instance_type   = "Standard_D8s_v5"
 dsx_boot_disk_size  = 512
 dsx_data_disk_count = 1
 dsx_data_disk_size  = 256

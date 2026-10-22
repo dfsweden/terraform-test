@@ -5,6 +5,10 @@
 #   - Azure CLI present and logged in
 #   - the chosen VM sizes exist in the target location, and
 #     support premium storage when a Premium_LRS disk was chosen
+#   - ha-multi-az: the location has availability zones, every
+#     requested zone offers the VM size (and the PremiumV2/Ultra
+#     disk SKU when in use) and is not restricted for the
+#     subscription
 #   - the image resource exists (when image_id is used)
 #   - dsx mode: the existing Anvil answers :8443 with the
 #     supplied credentials; image-vs-cluster Major.Minor is
@@ -32,24 +36,30 @@ data "external" "preflight" {
   program = ["python3", "${path.module}/scripts/preflight.py"]
 
   query = {
-    mode             = var.mode
-    location         = var.location
-    subscription     = var.subscription
-    vm_sizes         = jsonencode(var.vm_sizes)
-    premium_sizes    = jsonencode(var.premium_sizes)
-    anvil_size       = var.anvil_size
-    anvil_min_vcpus  = tostring(var.anvil_min_vcpus)
-    anvil_min_mem_gb = tostring(var.anvil_min_mem_gb)
-    dsx_size         = var.dsx_size
-    dsx_min_vcpus    = tostring(var.dsx_min_vcpus)
-    dsx_min_mem_gb   = tostring(var.dsx_min_mem_gb)
-    image_id         = var.image_id
-    image_generation = var.image_generation
-    image_sas_url    = var.image_sas_url
-    check_anvil      = var.check_anvil ? "true" : "false"
-    anvil_ip         = var.anvil_ip
-    anvil_password   = var.anvil_password
-    hsuser           = var.hsuser
+    mode                 = var.mode
+    location             = var.location
+    subscription         = var.subscription
+    vm_sizes             = jsonencode(var.vm_sizes)
+    premium_sizes        = jsonencode(var.premium_sizes)
+    anvil_size           = var.anvil_size
+    anvil_min_vcpus      = tostring(var.anvil_min_vcpus)
+    anvil_min_mem_gb     = tostring(var.anvil_min_mem_gb)
+    dsx_size             = var.dsx_size
+    dsx_min_vcpus        = tostring(var.dsx_min_vcpus)
+    dsx_min_mem_gb       = tostring(var.dsx_min_mem_gb)
+    anvil_count          = tostring(var.anvil_count)
+    dsx_count            = tostring(var.dsx_count)
+    anvil_zones          = jsonencode(var.anvil_zones)
+    dsx_zones            = jsonencode(var.dsx_zones)
+    anvil_meta_disk_type = var.anvil_meta_disk_type
+    dsx_data_disk_type   = var.dsx_data_disk_type
+    image_id             = var.image_id
+    image_generation     = var.image_generation
+    image_sas_url        = var.image_sas_url
+    check_anvil          = var.check_anvil ? "true" : "false"
+    anvil_ip             = var.anvil_ip
+    anvil_password       = var.anvil_password
+    hsuser               = var.hsuser
   }
 
   lifecycle {

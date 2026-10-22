@@ -11,19 +11,27 @@
 #
 #   ./stage-hammerspace-image.sh \
 #       -u "https://<acct>.blob.core.windows.net/.../<image>.vhd?sp=r&...&sig=..." \
-#       -g <resource-group> [-l <location>] [-n <image-name>]
+#       -g <resource-group> [-l <location>] [-n <image-name>] [-G V1|V2]
 #
 # The copy is SERVER-SIDE (Azure Storage pulls from the SAS URL);
 # nothing large flows through this machine. When it finishes, the
 # script prints the image ID to use as image_id in the Hammerspace
 # Terraform (or ARM/marketplace "existing image" deployments).
+#
+# -G selects the Hyper-V generation the image is REGISTERED as
+# (default V1). The Hammerspace VHD is hybrid-boot, so the same blob
+# serves both; generation is a property of the registration, not of
+# the bits, and Azure only lets it be declared from a VHD blob - a V1
+# image can never be converted to V2 later. V2 (UEFI) is required by
+# every Gen2-only size (all v6/v7 series). A V2 image is named
+# <image>-gen2 by default so both generations can coexist.
 # ============================================================
 set -euo pipefail
 
 usage() { grep '^#' "$0" | sed 's/^# \{0,1\}//' | sed -n '2,20p'; exit 1; }
 
-SAS_URL="" RG="" LOCATION="" IMAGE_NAME="" SA_NAME="" DELETE_VHD="false" TAGS=""
-while getopts "u:g:l:n:a:t:dh" opt; do
+SAS_URL="" RG="" LOCATION="" IMAGE_NAME="" SA_NAME="" DELETE_VHD="false" TAGS="" GEN="V1"
+while getopts "u:g:l:n:a:t:G:dh" opt; do
   case "$opt" in
     u) SAS_URL=$OPTARG ;;
     g) RG=$OPTARG ;;
@@ -31,11 +39,17 @@ while getopts "u:g:l:n:a:t:dh" opt; do
     n) IMAGE_NAME=$OPTARG ;;
     a) SA_NAME=$OPTARG ;;
     t) TAGS=$OPTARG ;;        # space-separated key=value tags for created resources
+    G) GEN=$OPTARG ;;         # Hyper-V generation to register the image as: V1 (default) or V2
     d) DELETE_VHD="true" ;;   # delete the staged .vhd blob after the image is created
     *) usage ;;
   esac
 done
 [ -n "$SAS_URL" ] && [ -n "$RG" ] || usage
+
+case "$GEN" in
+  V1|V2) ;;
+  *) echo "ERROR: -G must be V1 or V2 (got '$GEN')"; exit 1 ;;
+esac
 
 case "$SAS_URL" in
   https://*.vhd\?*) ;;
@@ -43,17 +57,31 @@ case "$SAS_URL" in
 esac
 
 BLOB_SRC_NAME=$(basename "${SAS_URL%%\?*}")
-IMAGE_NAME=${IMAGE_NAME:-"${BLOB_SRC_NAME%.vhd}"}
+if [ -z "$IMAGE_NAME" ]; then
+  IMAGE_NAME="${BLOB_SRC_NAME%.vhd}"
+  [ "$GEN" = "V2" ] && IMAGE_NAME="${IMAGE_NAME}-gen2"
+fi
 CONTAINER="hammerspace-images"
 
 # --- Idempotent: nothing to do when the image already exists ---
 # (This is what makes Terraform apply/destroy cycles reuse the image
-# instead of re-downloading the VHD.)
-if EXISTING_ID=$(az image show --resource-group "$RG" --name "$IMAGE_NAME" --query id -o tsv 2>/dev/null); then
+# instead of re-downloading the VHD.) An existing image of the OTHER
+# generation is an error, not a match: generation cannot be changed
+# after registration, so the caller must pick another name (-n).
+if EXISTING=$(az image show --resource-group "$RG" --name "$IMAGE_NAME" \
+      --query '[id, hyperVGeneration]' -o tsv 2>/dev/null); then
+  read -r EXISTING_ID EXISTING_GEN <<EOF0
+$EXISTING
+EOF0
+  if [ "${EXISTING_GEN:-V1}" != "$GEN" ]; then
+    echo "ERROR: image $IMAGE_NAME already exists in $RG as Hyper-V generation ${EXISTING_GEN:-V1}, not $GEN."
+    echo "       A registered image cannot change generation - choose another name with -n."
+    exit 1
+  fi
   cat <<EOF1
 
 ============================================================
-Image already staged - nothing to do.
+Image already staged ($GEN) - nothing to do.
 
   image_id = "$EXISTING_ID"
 ============================================================
@@ -119,12 +147,16 @@ EOF2
 done
 
 # --- Managed image (independent of the blob once created) ---
+# The generation is declared here, from the blob - the only point at which
+# Azure accepts it. The image is tagged with it so a listing shows which is
+# which when both generations are staged from one VHD.
 BLOB_URL="https://${SA_NAME}.blob.core.windows.net/${CONTAINER}/${BLOB_SRC_NAME}"
-echo ">> Creating managed image $IMAGE_NAME"
-# shellcheck disable=SC2086
+IMAGE_TAGS="generation=${GEN}${TAGS:+ $TAGS}"
+echo ">> Creating managed image $IMAGE_NAME (Hyper-V generation $GEN)"
+# shellcheck disable=SC2086  # IMAGE_TAGS is deliberately word-split into key=value pairs
 az image create --resource-group "$RG" --name "$IMAGE_NAME" --location "$LOCATION" \
-  --os-type Linux --hyper-v-generation V1 --source "$BLOB_URL" \
-  ${TAGS:+--tags $TAGS} --output none
+  --os-type Linux --hyper-v-generation "$GEN" --source "$BLOB_URL" \
+  --tags $IMAGE_TAGS --output none
 IMAGE_ID=$(az image show --resource-group "$RG" --name "$IMAGE_NAME" --query id -o tsv)
 
 if [ "$DELETE_VHD" = "true" ]; then
@@ -138,7 +170,8 @@ cat <<EOF3
 ============================================================
 DONE. Use this image in the Hammerspace deployment:
 
-  image_id = "$IMAGE_ID"
+  image_id         = "$IMAGE_ID"
+  image_generation = "$GEN"
 
 (The staged .vhd blob in $SA_NAME/$CONTAINER can be deleted to
 save storage cost$( [ "$DELETE_VHD" = "true" ] && echo " - already deleted (-d)" ); the image does not depend on it.)

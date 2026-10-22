@@ -1,21 +1,21 @@
-# Terraform
+# Provider plugins - ~1.1 GB, re-fetched by `terraform init`
 .terraform/
 .terraform.lock.hcl
-*.tfstate
-*.tfstate.*
-crash.log
-crash.*.log
 
-# Local overrides / secrets
-*.auto.tfvars
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
-terraform.tfvars
-
-# Plan files
+# State holds admin passwords and live addresses in cleartext. Never commit it.
+terraform.tfstate
+terraform.tfstate.*
+terraform.tfstate.d/
 *.tfplan
 
-# Python
+# Scratch variable files naming real subscriptions, VNets and hosts.
+#
+# Committed examples split two ways: examples/*.tfvars use placeholders only
+# and are safe to publish; examples/lab/*.tfvars carry real Hammerspace test
+# account values and are INTERNAL ONLY - any external release must exclude
+# that directory wholesale. See examples/README.md.
+test-*.tfvars
+
+# Python bytecode from the preflight helpers
 __pycache__/
+*.pyc

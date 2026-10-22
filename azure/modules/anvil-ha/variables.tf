@@ -70,6 +70,18 @@ variable "metadata_disk_type" {
   type = string
 }
 
+# Applied by hs-vm only to PremiumV2/Ultra disks - inert after the ha-mode
+# fallback to Premium_LRS, live for zonal (ha-multi-az) Anvils.
+variable "metadata_disk_iops" {
+  type    = number
+  default = null
+}
+
+variable "metadata_disk_throughput" {
+  type    = number
+  default = null
+}
+
 variable "cluster_ip" {
   type        = string
   default     = ""
@@ -89,6 +101,12 @@ variable "availability_set_id" {
 variable "ppg_id" {
   type    = string
   default = null
+}
+
+variable "zones" {
+  type        = list(string)
+  default     = []
+  description = "ha-multi-az: availability zone of each Anvil, in node order (\"1\" | \"2\" | \"3\"). Empty = no zone (availability-set placement). The root guarantees two entries when set."
 }
 
 variable "admin_username" {

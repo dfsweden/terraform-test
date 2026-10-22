@@ -11,6 +11,11 @@ Checks (hard errors unless noted):
   - every requested VM size exists in the target location
   - sizes with a Premium_LRS disk selected support premium storage
   - the image resource exists, when an image_id is used
+  - ha-multi-az: the location has availability zones, every requested zone
+    offers the VM size (and the PremiumV2/Ultra disk SKU when in use) and is
+    not restricted for this subscription
+  - standalone: PremiumV2/Ultra metadata disks are not requested in a region
+    that HAS zones, where Azure allows them only on a zonal VM
   - dsx mode only: the existing Anvil answers :8443 with the supplied
     credentials; when the image carries an hs_version tag, its Major.Minor
     must match the cluster's ANVIL node(s) (WARNING when the tag is absent)
@@ -83,8 +88,11 @@ def check_login(q):
         return ""
 
 
-def fetch_region_vm_skus(q):
-    """The region's VM SKU catalog as {size_name: sku}, cached on disk.
+SKU_CACHE_VERSION = 2  # v2: keeps 'disks' next to 'virtualMachines' (the zone checks need both)
+
+
+def fetch_region_skus(q):
+    """The region's SKU catalog as {'virtualMachines': {name: sku}, 'disks': {name: sku}}, cached on disk.
 
     Calls the Resource SKUs REST API directly with its server-side location
     filter (a few seconds). `az vm list-skus --size` is NOT used - its size
@@ -97,7 +105,7 @@ def fetch_region_vm_skus(q):
     location = q["location"]
 
     cache_key = hashlib.sha256(f"{sub}|{location}".encode()).hexdigest()[:16]
-    cache_file = os.path.join(tempfile.gettempdir(), f"hs-preflight-vmskus-{cache_key}.json")
+    cache_file = os.path.join(tempfile.gettempdir(), f"hs-preflight-skus-v{SKU_CACHE_VERSION}-{cache_key}.json")
     try:
         if time.time() - os.path.getmtime(cache_file) < SKU_CACHE_TTL_S:
             with open(cache_file) as f:
@@ -107,14 +115,17 @@ def fetch_region_vm_skus(q):
 
     url = (f"https://management.azure.com/subscriptions/{sub}/providers/Microsoft.Compute/skus"
            f"?api-version=2021-07-01&$filter=location%20eq%20%27{location}%27")
-    skus = {}
+    skus = {"virtualMachines": {}, "disks": {}}
     while url:
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok['accessToken']}"})
         with urllib.request.urlopen(req, timeout=60) as resp:
             payload = json.load(resp)
         for s in payload.get("value", []):
-            if s.get("resourceType") == "virtualMachines":
-                skus[s["name"]] = s
+            rt = s.get("resourceType")
+            if rt in skus:
+                # disks: the API lists one entry per tier (P4, P6, ...) under the
+                # same name; they share zones and restrictions, so last-wins is fine.
+                skus[rt][s["name"]] = s
         url = payload.get("nextLink")
 
     try:
@@ -123,6 +134,29 @@ def fetch_region_vm_skus(q):
     except OSError:
         pass
     return skus
+
+
+def fetch_region_vm_skus(q):
+    return fetch_region_skus(q)["virtualMachines"]
+
+
+def _offered_zones(sku):
+    """Zones a SKU is OFFERED in (locationInfo[0].zones); empty in a non-zonal region."""
+    return set((sku.get("locationInfo") or [{}])[0].get("zones") or [])
+
+
+def _restrictions(sku):
+    """(whole_location: bool, zones: set) - a 'Location' restriction covers the
+    region, a 'Zone' one lists the zones THIS subscription may not deploy in."""
+    loc, zones = False, set()
+    for r in sku.get("restrictions", []) or []:
+        if not r:
+            continue
+        if r.get("type") == "Zone":
+            zones |= set((r.get("restrictionInfo") or {}).get("zones") or [])
+        else:
+            loc = True
+    return loc, zones
 
 
 def check_vm_sizes(q):
@@ -136,9 +170,15 @@ def check_vm_sizes(q):
             if match is None:
                 errors.append(f"VM size {size} is not available in location {location}.")
                 continue
-            restrictions = [r for r in match.get("restrictions", []) if r]
-            if restrictions:
-                reasons = ", ".join(r.get("reasonCode", "?") for r in restrictions)
+            # A Zone restriction on SOME zones is not a regional restriction: a
+            # non-zonal VM (ha / standalone) is placed around it. Only a
+            # Location restriction, or zones restricted everywhere the size is
+            # offered, makes the size unusable here. Requested zones are
+            # checked against zone restrictions in check_zones.
+            loc_restricted, zone_restricted = _restrictions(match)
+            offered = _offered_zones(match)
+            if loc_restricted or (offered and zone_restricted >= offered):
+                reasons = ", ".join(r.get("reasonCode", "?") for r in match.get("restrictions", []) if r)
                 errors.append(f"VM size {size} is restricted for this subscription in {location} ({reasons}).")
             if size in premium:
                 caps = {c.get("name"): c.get("value") for c in match.get("capabilities", [])}
@@ -173,7 +213,182 @@ def check_vm_sizes(q):
                         f"{role} size {size} is below the product minimum: has {vcpus:g} vCPU / {mem:g} GiB, "
                         f"needs at least {min_vcpus:g} vCPU / {min_mem:g} GiB.")
     except Exception as e:
-        warnings.append(f"Could not verify VM size availability ({e}) - confirm the sizes exist in {location} manually.")
+        warnings.append(f"NOT CHECKED: could not verify VM size availability ({e}) - confirm the sizes exist in {location} manually.")
+
+
+def check_vcpu_quota(q):
+    """Per-family and regional vCPU quota vs what this deployment will consume.
+
+    Pre-flight used to verify a VM size is OFFERED in the region but never that
+    the subscription has ROOM for it, so a quota shortfall - the single most
+    common reason a "newer is better" size substitution fails - surfaced only
+    at apply, as an OperationNotAllowed on the second or third VM. Quota is
+    granted per family (standardDSv5Family, ...) and separately as a regional
+    total ('cores'), and both are checked here.
+
+    Sizes are mapped to families through the same SKU catalog check_vm_sizes
+    already fetched (cached on disk), and the numbers come from
+    `az vm list-usage`, which is what an operator would run by hand.
+    """
+    location = q["location"]
+    try:
+        skus = fetch_region_vm_skus(q)
+        needed = {}      # family -> vCPUs this apply adds
+        total = 0.0
+        for size_key, count_key in (("anvil_size", "anvil_count"), ("dsx_size", "dsx_count")):
+            size = (q.get(size_key) or "").strip()
+            count = int(float(q.get(count_key) or 0))
+            if not size or count <= 0 or size not in skus:
+                continue
+            sku = skus[size]
+            caps = {c.get("name"): c.get("value") for c in sku.get("capabilities", [])}
+            vcpus = float(caps.get("vCPUs", 0) or 0) * count
+            family = sku.get("family") or ""
+            if family:
+                needed[family] = needed.get(family, 0.0) + vcpus
+            total += vcpus
+        if not needed:
+            return
+        usage = {u.get("name", {}).get("value"): u for u in (az(q, ["vm", "list-usage", "-l", location]) or [])}
+        for family, add in needed.items():
+            u = usage.get(family)
+            if u is None:
+                warnings.append(f"NOT CHECKED: no quota entry named {family} in {location} - confirm capacity manually.")
+                continue
+            cur, lim = float(u.get("currentValue", 0)), float(u.get("limit", 0))
+            if cur + add > lim:
+                errors.append(
+                    f"vCPU quota for {family} in {location} cannot fit this deployment: "
+                    f"{cur:g} in use + {add:g} needed = {cur + add:g}, limit {lim:g} (only {lim - cur:g} free). "
+                    f"Request an increase for that family, or choose sizes from a family with room - "
+                    f"quota is per family, so mixing e.g. Dsv5 Anvils with Dsv3 DSX is a valid workaround.")
+        u = usage.get("cores")
+        if u is not None:
+            cur, lim = float(u.get("currentValue", 0)), float(u.get("limit", 0))
+            if cur + total > lim:
+                errors.append(
+                    f"Total regional vCPU quota in {location} cannot fit this deployment: "
+                    f"{cur:g} in use + {total:g} needed = {cur + total:g}, limit {lim:g}.")
+    except Exception as e:
+        warnings.append(f"NOT CHECKED: could not verify vCPU quota ({e}) - run 'az vm list-usage -l {location}' manually.")
+
+
+def check_zones(q):
+    """ha-multi-az: every requested zone must exist in the region, offer the VM
+    size, not be restricted for this subscription, and (PremiumV2/Ultra) offer
+    the disk SKU. Skipped when no zones were requested.
+
+    Zone facts come from the same Resource SKUs catalog check_vm_sizes uses:
+    locationInfo[0].zones is where a SKU is OFFERED, restrictions[] of type Zone
+    where THIS subscription may not deploy it - both are needed. The region
+    "has zones" iff any VM SKU lists one (westus lists none), which is what
+    `az vm list-skus -l <loc> --zone` shows an operator, and needs no second
+    CLI call.
+    """
+    roles = (("Anvil", "anvil_size", "anvil_zones", "anvil_meta_disk_type"),
+             ("DSX", "dsx_size", "dsx_zones", "dsx_data_disk_type"))
+    wanted = {}
+    for role, size_key, zones_key, disk_key in roles:
+        try:
+            zones = json.loads(q.get(zones_key) or "[]")
+        except ValueError:
+            zones = []
+        wanted[role] = ((q.get(size_key) or "").strip(), zones, (q.get(disk_key) or "").strip(), zones_key)
+    requested = sorted({z for _, zones, _, _ in wanted.values() for z in zones})
+    if not requested:
+        return
+    location = q["location"]
+    try:
+        catalog = fetch_region_skus(q)
+        vm_skus, disk_skus = catalog["virtualMachines"], catalog["disks"]
+        region_zones = sorted({z for sku in vm_skus.values() for z in _offered_zones(sku)})
+        if not region_zones:
+            errors.append(
+                f"Location {location} has no availability zones - ha-multi-az needs a zonal region "
+                f"(westus2, westus3, eastus, ...). Use deployment_mode = \"ha\" here, which places the "
+                f"Anvils in an availability set instead.")
+            return
+        missing = [z for z in requested if z not in region_zones]
+        if missing:
+            errors.append(f"Zone(s) {', '.join(missing)} do not exist in {location} "
+                          f"(it has zones {', '.join(region_zones)}).")
+            return
+        for role, (size, zones, disk_type, var_name) in wanted.items():
+            if not size or not zones or size not in vm_skus:  # a missing size is check_vm_sizes' error
+                continue
+            sku = vm_skus[size]
+            offered = _offered_zones(sku)
+            _, restricted = _restrictions(sku)
+            bad = [z for z in zones if z not in offered]
+            if bad:
+                errors.append(
+                    f"{role} size {size} is not offered in zone(s) {', '.join(bad)} of {location} "
+                    f"(offered in {', '.join(sorted(offered)) or 'none'}) - change {var_name}, or pick a "
+                    f"size offered in every zone listed.")
+            bad = [z for z in zones if z in restricted]
+            if bad:
+                errors.append(
+                    f"{role} size {size} is restricted for this subscription in zone(s) {', '.join(bad)} "
+                    f"of {location} - change {var_name}, or have the restriction lifted.")
+            if disk_type in ("PremiumV2_LRS", "UltraSSD_LRS"):
+                dsku = disk_skus.get(disk_type)
+                if dsku is None:
+                    errors.append(f"{disk_type} disks are not offered in {location} - choose Premium_LRS for the {role} disks.")
+                    continue
+                offered = _offered_zones(dsku)
+                _, restricted = _restrictions(dsku)
+                bad = [z for z in zones if z not in offered or z in restricted]
+                if bad:
+                    errors.append(
+                        f"{disk_type} disks are not available in zone(s) {', '.join(bad)} of {location} "
+                        f"(available in {', '.join(sorted(offered - restricted)) or 'none'}), but {var_name} "
+                        f"puts {role} nodes there - move them, or choose Premium_LRS.")
+    except Exception as e:
+        warnings.append(f"NOT CHECKED: could not verify availability-zone placement ({e}) - "
+                        f"confirm with 'az vm list-skus -l {location} --zone' manually.")
+
+
+def check_perf_disk_placement(q):
+    """PremiumV2/Ultra disks require a VM in an availability ZONE - but only in
+    a region that HAS zones. A standalone Anvil is deliberately in neither a
+    zone nor an availability set, so in a zonal region the attachment is
+    rejected at apply:
+
+      InvalidParameter: Managed disks with 'PremiumV2_LRS' storage account type
+      can be used only with Virtual Machines in an Availability Zone.
+
+    Measured 2026-09-26 in westus2 on deployment_mode=standalone with the
+    default anvil_metadata_disk_type. The same configuration works in westus,
+    which has no zones - hence the region-dependent check rather than a blanket
+    rule, and hence why this was invisible until the tree was exercised in a
+    zonal region.
+
+    ha and dsx are unaffected: their VMs sit in availability sets, and the root
+    already falls PremiumV2/Ultra back to Premium_LRS for those (with a plan
+    warning). ha-multi-az is unaffected because its VMs are zonal, which is
+    exactly what these disks want.
+    """
+    if (q.get("mode") or "") != "standalone":
+        return
+    disk = (q.get("anvil_meta_disk_type") or "").strip()
+    if disk not in ("PremiumV2_LRS", "UltraSSD_LRS"):
+        return
+    location = q["location"]
+    try:
+        vm_skus = fetch_region_skus(q)["virtualMachines"]
+        region_zones = sorted({z for sku in vm_skus.values() for z in _offered_zones(sku)})
+        if not region_zones:
+            return  # non-zonal region: a non-zonal VM may use these disks
+        errors.append(
+            f"anvil_metadata_disk_type {disk} cannot be attached to a standalone Anvil in "
+            f"{location}: the region has availability zones ({', '.join(region_zones)}), and Azure "
+            f"only allows {disk} on a VM placed IN a zone - a standalone Anvil is in neither a zone "
+            f"nor an availability set. Either set anvil_metadata_disk_type = \"Premium_LRS\" (size "
+            f"for IOPS: 1024 GB = 5000), or use deployment_mode = \"ha-multi-az\", whose Anvils are "
+            f"zonal and keep {disk}. The same configuration is valid in a region without zones.")
+    except Exception as e:
+        warnings.append(f"NOT CHECKED: could not verify performance-disk placement ({e}) - "
+                        f"PremiumV2/Ultra need a zonal VM in a zonal region.")
 
 
 def check_image(q):
@@ -296,6 +511,9 @@ def main():
     image_version = ""
     if account:
         check_vm_sizes(q)
+        check_zones(q)
+        check_perf_disk_placement(q)
+        check_vcpu_quota(q)
         image_version = check_image(q)
     check_sas_image(q)
 

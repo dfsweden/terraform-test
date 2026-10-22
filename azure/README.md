@@ -9,11 +9,21 @@ anything is created, and every VM ends up tagged with the cluster ID.
 |---|---|---|
 | `standalone` | `anvilConfiguration: Standalone` | Single-node Anvil + DSX node(s) |
 | `ha` | `anvilConfiguration: High Availability` | 2-node HA Anvil + internal LB + DSX node(s) |
+| `ha-multi-az` | — (no ARM equivalent) | 2-node HA Anvil, **one per availability zone**, zone-redundant internal LB + DSX node(s) spread over zones |
 | `dsx` | `solutionDeploymentType: Add Data Services (DSX)…` | DSX node(s) joined to an **existing** cluster |
 
-There is **no multi-az mode**: the Azure reference design places the two
-Anvils in an **availability set** (fault-domain separation) behind an internal
-load balancer — availability zones are not part of the design.
+`ha` is the Azure reference design: the two Anvils in an **availability set**
+(fault-domain separation inside one datacenter) behind an internal load
+balancer. `ha-multi-az` keeps the same load balancer with a **zone-redundant
+frontend** and pins Anvil1/Anvil2 to `anvil_zones` and the DSX nodes
+round-robin over `dsx_zones` — separate datacenters, the counterpart of the
+AWS `ha-multi-az`. It needs a region that has zones (`westus` does not;
+pre-flight checks), cannot use a proximity placement group or
+`availability_set_name` (a VM is in a set *or* a zone), and still needs the
+heartbeat subnet (subnets span zones, so one serves both). Because zonal VMs
+may use PremiumV2/Ultra disks — which Azure forbids on availability-set VMs —
+`ha-multi-az` Anvils keep the PremiumV2 metadata disk that `ha` falls back
+from.
 
 ## How Azure HA works here (vs AWS)
 
@@ -61,13 +71,27 @@ load balancer — availability zones are not part of the design.
     **persists across `terraform destroy`** (create-only staging), so product
     apply/destroy cycles never re-download (see
     `examples/sa-customer-sas.tfvars`; don't IP-restrict the SAS — the copy
-    runs from Azure Storage, not the deploying machine).
+    runs from Azure Storage, not the deploying machine). The image is
+    registered as the generation `image_generation` declares (default V1);
+    set `V2` for a Gen2/UEFI deployment and it is staged as `<vhd>-gen2`
+    alongside any V1 image of the same VHD.
 
   Customers can also stage the image **ahead of time**, decoupled from any
   deployment, with `scripts/stage-hammerspace-image.sh` (runs as-is in Azure
   Cloud Shell): it performs the same server-side copy + managed-image wrap
-  and prints the `image_id` to use above. Preferred when the image will be
-  reused across deployments — it survives `terraform destroy`.
+  and prints the `image_id` to use above (`-G V2` registers a Gen2 image).
+  Preferred when the image will be reused across deployments — it survives
+  `terraform destroy`.
+
+  **Generation is a property of the registration, not of the VHD.** The
+  Hammerspace VHD is hybrid-boot (GPT plus a populated EFI partition), so
+  one blob serves both generations, but Azure accepts the generation only
+  when an image is created from a VHD blob: a V1 image can never become V2
+  later. Every Gen2-only size (all v6/v7 series) needs a V2 image, and v6/v7
+  additionally need it published through a Compute Gallery definition that
+  declares `DiskControllerTypes = "SCSI, NVMe"`, which this configuration
+  does not create; a staged managed image boots Gen2 on dual-generation
+  sizes such as v5.
 - Network path to the Anvil's `:8443` for the post-deploy wait + tagging
   (`wait_for_cluster = false` to skip).
 
@@ -85,8 +109,8 @@ terraform plan -var-file=examples/ha-standard.tfvars
 terraform apply -var-file=examples/ha-standard.tfvars
 ```
 
-Examples: `examples/ha-standard.tfvars`, `examples/sa-standard.tfvars`,
-`examples/dsx-existing.tfvars`.
+Examples: `examples/ha-standard.tfvars`, `examples/ha-multi-az.tfvars`,
+`examples/sa-standard.tfvars`, `examples/dsx-add-to-existing.tfvars`.
 
 ## Pre-flight validation (hard stop)
 
@@ -96,10 +120,15 @@ The plan fails before creating anything when:
 - the Azure CLI is not logged in;
 - a chosen VM size doesn't exist (or is restricted) in the location, or a
   `Premium_LRS` disk was selected on a size without premium-storage support;
-- a chosen VM size is **Hyper-V Generation 2-only** (the whole v6/v7 series,
-  Mv2, ARM64, confidential-computing sizes…) — Hammerspace images are
-  Generation 1 and cannot boot on them; sizes supporting both generations
-  pass;
+- `ha-multi-az`: the location has no availability zones, a requested zone
+  doesn't exist, doesn't offer the VM size, is restricted for the
+  subscription, or lacks the PremiumV2/Ultra disk SKU in use;
+- the per-family vCPU quota (and the regional total) cannot fit the
+  deployment;
+- a chosen VM size does not support the image's generation
+  (`image_generation`, default V1): Gen2-only sizes (the whole v6/v7 series,
+  Mv2, ARM64, confidential-computing sizes…) reject a V1 image and Gen1-only
+  sizes reject a V2 one; sizes supporting both generations pass either way;
 - a node is below the product minimum — Anvil 16 vCPU / 32 GiB, DSX 8 vCPU /
   16 GiB (SKU capability check), or a boot disk is under 512 GB (variable
   validation);
@@ -120,7 +149,7 @@ RBAC problems surface at apply time rather than pre-flight.
   5-char random tail (AWS parity — keeps each incarnation's resource IDs
   unique so activity logs never splice deployments): `<name><rand>Anvil1`,
   `<name><rand>Anvil2`, `<name><rand>Dsx1…N`, `<name><rand>NetSecGroup`, `<name><rand>LoadBalancer`,
-  `<name>AnvilAvailSet` / `<name>DSXAvailSet`; hostnames `<name>Anvil`,
+  `<name>AnvilAvailSet` / `<name>DSXAvailSet` (not in `ha-multi-az`); hostnames `<name>Anvil`,
   `<name>Anvil-2`, `<name>Dsx<i>`; domain `<name>.azure`.
 - **NSG**: one Allow rule (priority 2000) with the explicit Hammerspace port
   set from the marketplace template, attached to every NIC (the existing

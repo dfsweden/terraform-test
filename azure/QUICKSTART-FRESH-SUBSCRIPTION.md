@@ -145,6 +145,11 @@ and (6) with:
 image_id = "<the line the script printed>"
 ```
 
+If Hammerspace told you the image is for **Gen2 (UEFI)** sizes, add `-G V2`
+to the script and set `image_generation = "V2"` in your vars file; the
+staged image is then named `Hammerspace-<version>-gen2`. The default (V1)
+and the VM sizes in this guide work together without either.
+
 Re-running the script is always safe: if the image already exists it just
 prints the `image_id` again and exits in about a second. Add `-d` to delete
 the intermediate `.vhd` blob after the image is created (the image is
@@ -214,6 +219,6 @@ az group delete -n hs-net-rg --yes
 |---|---|
 | `plan` fails on `image_sas_url` | SAS expired or mispasted — ask Hammerspace for a fresh link. Note: the URL must NOT be IP-restricted (Azure Storage performs the copy, not your machine). |
 | `plan` fails on a VM size | That size isn't offered in your region — pick another region, or another size meeting the minimums (Anvil 16 vCPU / 32 GiB, DSX 8 vCPU / 16 GiB). |
-| `plan` says the size "only boots Hyper-V generation V2 images" | The Hammerspace image is Generation 1; the newest VM series (v6/v7, ARM64, confidential) are Gen2-only. Use a size listing V1 support — the defaults in this guide do. |
+| `plan` says the size "only boots Hyper-V generation V2 images" | Your vars file declares (or defaults to) a Generation 1 image, and the newest VM series (v6/v7, ARM64, confidential) are Gen2-only. Either use a size listing V1 support — the defaults in this guide do — or, if Hammerspace confirmed the image boots UEFI, set `image_generation = "V2"` (with `image_sas_url` it is then registered as Gen2). |
 | `apply` succeeds but you can't open `:8443` | No network path: set `public_ip_addresses = true` for the test, or run from a machine that can reach the VNet. Ping never works (ICMP is not in the security group) — test the port instead. |
 | First boot seems stuck > 25 min | Check the VM isn't stopped (`az vm list -g hs-test-rg -d -o table`) — some corporate subscriptions run automation that powers off unrecognized VMs. |

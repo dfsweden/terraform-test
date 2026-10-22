@@ -10,19 +10,23 @@
 # managed image copies the data and is self-contained, so only the image -
 # not a redundant 30+ GB blob - persists long-term.
 #
-# The image is named after the .vhd file (Hammerspace-<version>...), so a new
-# VHD version stages a new image alongside the old one. Clean up outgrown
-# images/staging storage manually (az image delete / az storage account
-# delete) - they are deliberately outside Terraform state.
+# The image is named after the .vhd file (Hammerspace-<version>...), with a
+# -gen2 suffix for a V2 registration, so a new VHD version - or the other
+# generation of the same VHD - stages a new image alongside the old one.
+# Generation is a property of the registration, not of the bits, and Azure
+# accepts it only from a VHD blob, so a V2 image can never be derived from
+# the staged V1 image later: it has to be registered from the blob here.
+# Clean up outgrown images/staging storage manually (az image delete /
+# az storage account delete) - they are deliberately outside Terraform state.
 
 locals {
   vhd_name   = basename(split("?", var.sas_url)[0])
-  image_name = trimsuffix(local.vhd_name, ".vhd")
+  image_name = "${trimsuffix(local.vhd_name, ".vhd")}${var.hyperv_generation == "V2" ? "-gen2" : ""}"
   tag_args   = join(" ", [for k, v in var.tags : "${k}=${v}"])
 }
 
 resource "terraform_data" "stage" {
-  triggers_replace = [local.image_name, var.resource_group]
+  triggers_replace = [local.image_name, var.resource_group, var.hyperv_generation]
 
   provisioner "local-exec" {
     interpreter = ["/usr/bin/env", "bash", "-c"]
@@ -38,6 +42,7 @@ resource "terraform_data" "stage" {
         -g "${var.resource_group}" \
         -l "${var.location}" \
         -n "${local.image_name}" \
+        -G "${var.hyperv_generation}" \
         -d \
         ${local.tag_args != "" ? "-t \"${local.tag_args}\"" : ""}
     EOT

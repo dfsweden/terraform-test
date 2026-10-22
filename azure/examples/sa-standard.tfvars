@@ -25,7 +25,7 @@ admin_password = "<YOUR_ADMIN_PASSWORD>"
 anvil_data_cluster_ip = ""
 
 # --- Anvil sizing ---
-anvil_instance_type  = "Standard_F16s_v2" # Anvil minimum is 16 vCPU / 32 GiB
+anvil_instance_type  = "Standard_D16s_v5" # Anvil minimum is 16 vCPU / 32 GiB
 anvil_boot_disk_size = 512                # minimum 512 GB (boot-disk performance)
 # Metadata disk defaults to Premium SSD v2 with provisioned performance
 # (standalone Anvils are not in an availability set, so PremiumV2 works):
@@ -41,13 +41,15 @@ anvil_metadata_disk_size = 256
 
 # --- DSX (product minimum: 8 vCPU / 16 GiB - enforced by pre-flight) ---
 dsx_count           = 1
-dsx_instance_type   = "Standard_F8s_v2"
+dsx_instance_type   = "Standard_D8s_v5"
 dsx_boot_disk_size  = 512 # minimum 512 GB
 dsx_data_disk_count = 1
 dsx_data_disk_size  = 256
 
 public_ip_addresses = false
 
-tags = {
-  owner = "<YOUR_NAME>"
-}
+# --- Ownership (REQUIRED) ---
+# Tagged onto every resource. It is how anyone - your own cloud team included -
+# tells whose deployment this is and who to ask before touching it.
+owner = "<YOUR_NAME>"
+

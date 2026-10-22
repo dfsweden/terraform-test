@@ -3,7 +3,7 @@ output "deployment_mode" {
 }
 
 output "anvil_ip" {
-  description = "Cluster / Anvil IP the DSX nodes join (standalone: Anvil NIC IP; ha: internal LB frontend / floating cluster IP; dsx: the supplied existing IP)."
+  description = "Cluster / Anvil IP the DSX nodes join (standalone: Anvil NIC IP; ha / ha-multi-az: internal LB frontend / floating cluster IP, zone-redundant in ha-multi-az; dsx: the supplied existing IP)."
   value       = local.anvil_ip
 }
 

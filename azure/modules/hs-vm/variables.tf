@@ -35,6 +35,12 @@ variable "ppg_id" {
   default = null
 }
 
+variable "zone" {
+  type        = string
+  default     = null
+  description = "Availability zone (\"1\" | \"2\" | \"3\") for the VM and every data disk it owns - a zonal VM can only attach disks in its own zone. null = no zone (regional or availability-set placement). Mutually exclusive with availability_set_id."
+}
+
 variable "image_id" {
   type    = string
   default = ""
@@ -72,7 +78,7 @@ variable "data_disks" {
 
 variable "custom_data" {
   type        = string
-  description = "Raw provisioning JSON (the legacy VM resource base64-encodes it, matching the ARM base64() call)."
+  description = "Raw provisioning JSON. The module base64-encodes it, matching the ARM base64() call."
 }
 
 variable "admin_username" {

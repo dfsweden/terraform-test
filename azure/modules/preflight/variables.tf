@@ -94,3 +94,39 @@ variable "hsuser" {
   type    = string
   default = "admin"
 }
+
+variable "anvil_count" {
+  type        = number
+  default     = 0
+  description = "Anvil VMs this apply creates (0 in dsx mode) - for the per-family vCPU quota check."
+}
+
+variable "dsx_count" {
+  type        = number
+  default     = 0
+  description = "DSX VMs this apply creates - for the per-family vCPU quota check."
+}
+
+variable "anvil_zones" {
+  type        = list(string)
+  default     = []
+  description = "ha-multi-az: zones the Anvils land in - each must exist in the location and offer the size (empty = skip the zone checks)."
+}
+
+variable "dsx_zones" {
+  type        = list(string)
+  default     = []
+  description = "ha-multi-az: zones the DSX nodes land in - same checks as anvil_zones (empty = skip)."
+}
+
+variable "anvil_meta_disk_type" {
+  type        = string
+  default     = ""
+  description = "Resolved Anvil metadata disk type; PremiumV2_LRS / UltraSSD_LRS must be offered in every requested zone (empty or other types = skip)."
+}
+
+variable "dsx_data_disk_type" {
+  type        = string
+  default     = ""
+  description = "Resolved DSX data disk type; same zone check as anvil_meta_disk_type."
+}
