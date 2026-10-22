@@ -167,6 +167,16 @@ resource "azurerm_managed_disk" "data" {
 
   tags = var.tags
 
+  # Create the disks only once the VM exists, so they are attached seconds
+  # after creation instead of sitting unattached while the VM waits on its
+  # image. With image_sas_url the VM waits for the whole VHD copy (7 min
+  # measured, 2026-10-22), and subscription hygiene automation that reaps
+  # unattached disks deleted the metadata disk in that window - the apply
+  # then failed at the attachment with "managed disk was not found".
+  # Cost: disk creation starts ~2 min later. It changes nothing on destroy:
+  # the attachment still goes first, then disk and VM.
+  depends_on = [azurerm_linux_virtual_machine.this]
+
   timeouts {
     delete = "10m"
   }
