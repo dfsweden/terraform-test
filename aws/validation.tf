@@ -46,12 +46,31 @@ resource "terraform_data" "validate_inputs" {
           length(trimspace(v)) > 0 && !startswith(trimspace(v), "<")
         ])
       )
-      error_message = "deployment_mode 'dsx' adds DSX node(s) to an EXISTING cluster - anvil_ip and anvil_password must identify it. See examples/dsx-existing.tfvars."
+      error_message = "deployment_mode 'dsx' adds DSX node(s) to an EXISTING cluster - anvil_ip and anvil_password must identify it. See examples/dsx-add-to-existing.tfvars."
     }
 
     precondition {
       condition     = local.is_dsx_only ? var.dsx_count > 0 : true
       error_message = "deployment_mode 'dsx' with dsx_count = 0 would create nothing."
+    }
+
+    # Kept here rather than as a variable validation: a failing variable
+    # validation prints the value even for a sensitive variable, and this is a
+    # cluster password (verified on terraform 1.9.8).
+    # --- Elastic IPs ---
+    precondition {
+      condition     = !(var.create_eips && trimspace(var.eip) != "")
+      error_message = "create_eips allocates NEW Elastic IPs; var.eip associates a pre-existing one. Set one or the other, not both."
+    }
+
+    precondition {
+      condition     = !var.create_eips || local.is_standalone || local.is_dsx_only
+      error_message = "create_eips is supported for standalone and dsx modes. The HA shapes reach the cluster on their floating cluster IP, which is a private address and is not an Elastic IP."
+    }
+
+    precondition {
+      condition     = var.anvil_password == "" || !startswith(var.anvil_password, "<")
+      error_message = "anvil_password still contains a <PLACEHOLDER> - set the existing cluster's admin password."
     }
   }
 }

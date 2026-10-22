@@ -151,7 +151,7 @@ def simulate(q, principal_arn, actions, who):
                 errors.append(f"{who} {principal_arn} is missing IAM action: {res.get('EvalActionName')}")
     except Exception:
         warnings.append(
-            f"Could not run iam:SimulatePrincipalPolicy on {principal_arn} - grant that action to enable "
+            f"NOT CHECKED: could not run iam:SimulatePrincipalPolicy on {principal_arn} - grant that action to enable "
             f"automatic checks. Manually confirm it allows: {', '.join(actions)}")
 
 
@@ -228,7 +228,7 @@ def check_vpc_endpoints(q):
                     "STS-dependent features may fail if the subnet has no internet route")
     except Exception:
         warnings.append(
-            "Could not complete VPC endpoint validation (insufficient describe permissions?) - "
+            "NOT CHECKED: could not complete VPC endpoint validation (insufficient describe permissions?) - "
             f"verify EC2 API reachability from subnet(s) {', '.join(subnets)} manually")
 
 

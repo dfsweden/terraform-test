@@ -6,12 +6,8 @@
 # Ephemeral / instance-store detection: on types with built-in NVMe drives
 # the metadata EBS volumes are skipped (Hammerspace uses the built-in
 # drives). The boot volume is ALWAYS provisioned.
-data "aws_ec2_instance_type" "anvil" {
-  instance_type = var.instance_type
-}
-
 locals {
-  has_ephemeral = data.aws_ec2_instance_type.anvil.instance_storage_supported
+  has_ephemeral = var.has_ephemeral
   meta_devices  = local.has_ephemeral ? [] : slice(["/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde"], 0, var.meta_disk_count)
   raid_opt      = var.raid_type == "stripe" ? "raid0" : "raid1"
 
@@ -82,16 +78,26 @@ resource "aws_instance" "anvil" {
   }
 
   tags = merge(var.tags, { Name = var.name })
+
+  lifecycle {
+    # Hammerspace reads user_data ONCE, at first boot. Without this, editing
+    # anything that feeds it - MTU, node roles, iam_admin_group, raid type, the
+    # cluster IP - produces a diff terraform applies while the running node
+    # keeps its original configuration: the apply reports success and nothing
+    # on the node changes.
+    #
+    # Deliberately ignore_changes and NOT user_data_replace_on_change = true:
+    # the latter is "correct" but destroys and recreates a live Anvil or DSX on
+    # an incidental edit, which is far worse. To change any of these, rebuild
+    # the node. Azure's hs-vm module does the same with custom_data.
+    ignore_changes = [user_data]
+  }
+
 }
 
 # Optional Elastic IP association (pre-existing EIP, looked up by address).
-data "aws_eip" "this" {
-  count     = var.eip != "" ? 1 : 0
-  public_ip = var.eip
-}
-
 resource "aws_eip_association" "this" {
-  count         = var.eip != "" ? 1 : 0
+  count         = length(var.eip_allocation_ids)
   instance_id   = aws_instance.anvil.id
-  allocation_id = data.aws_eip.this[0].id
+  allocation_id = var.eip_allocation_ids[count.index]
 }

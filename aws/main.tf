@@ -20,7 +20,7 @@ module "preflight" {
   aws_profile               = var.aws_profile
   vpc                       = var.vpc
   subnet_ids                = local.preflight_subnets
-  deployer_actions          = local.preflight_deployer_actions[var.deployment_mode]
+  deployer_actions          = concat(local.preflight_deployer_actions[var.deployment_mode], local.eip_deployer_actions)
   iam_instance_profile_name = var.iam_instance_profile_name
   instance_profile_actions  = local.preflight_instance_profile_actions[var.deployment_mode]
   check_sts                 = var.check_sts_endpoint
@@ -35,10 +35,14 @@ module "preflight" {
 }
 
 # Pre-flight warnings surface as plan warnings (errors fail the plan outright).
+#
+# Entries prefixed "NOT CHECKED:" mean pre-flight lacked the permission to run
+# that check, not that it ran and found nothing - a clean plan is only proof
+# the checks executed if no such line appears.
 check "preflight_warnings" {
   assert {
     condition     = var.skip_preflight || try(module.preflight[0].warnings, "") == ""
-    error_message = "PRE-FLIGHT WARNING(S):\n${try(module.preflight[0].warnings, "")}"
+    error_message = "PRE-FLIGHT WARNING(S) - lines marked 'NOT CHECKED' were skipped, not passed:\n${try(module.preflight[0].warnings, "")}"
   }
 }
 
@@ -105,6 +109,7 @@ module "anvil_standalone" {
   count  = local.is_standalone ? 1 : 0
   source = "./modules/anvil-standalone"
 
+  has_ephemeral        = local.anvil_has_ephemeral
   name                 = "anvil-1-${local.name_suffix}"
   ami                  = var.hs_ami
   instance_type        = var.anvil_instance_type
@@ -119,8 +124,13 @@ module "anvil_standalone" {
   raid_type            = var.anvil_raid_type
   network_mtu          = var.network_mtu
   iam_admin_group      = var.iam_admin_group
-  eip                  = var.eip
-  tags                 = local.aws_tags
+  # eip (the address) only sets the module's anvil_ip output, i.e. what the DSX
+  # joins on. With create_eips that must stay the PRIVATE IP - same subnet, no
+  # hairpin out through the internet gateway, jumbo frames intact - so only the
+  # allocation ID is passed and the address is left empty.
+  eip                = var.create_eips ? "" : var.eip
+  eip_allocation_ids = local.anvil_eip_allocation_ids
+  tags               = local.aws_tags
 
   depends_on = [terraform_data.validate_inputs, module.preflight]
 }
@@ -129,6 +139,7 @@ module "anvil_ha" {
   count  = local.is_ha ? 1 : 0
   source = "./modules/anvil-ha"
 
+  has_ephemeral        = local.anvil_has_ephemeral
   name_suffix          = local.name_suffix
   ami                  = var.hs_ami
   instance_type        = var.anvil_instance_type
@@ -155,6 +166,7 @@ module "anvil_ha_multiaz" {
   count  = local.is_multiaz ? 1 : 0
   source = "./modules/anvil-ha-multiaz"
 
+  has_ephemeral        = local.anvil_has_ephemeral
   name_suffix          = local.name_suffix
   ami                  = var.hs_ami
   instance_type        = var.anvil_instance_type
@@ -227,11 +239,151 @@ data "aws_ec2_instance_type" "dsx_minimum" {
   }
 }
 
+# --- Multi-AZ topology checks (ROOT level, for the same reason as above) ---
+#
+# These lived in modules/anvil-ha-multiaz, whose header claimed they "run
+# natively at plan time". They did not: the module is called with depends_on,
+# which defers every data source inside it to APPLY - so a subnet in the wrong
+# AZ, a subnet or route table in the wrong VPC, or an overlay IP inside the VPC
+# CIDR was only caught after the operator had already approved the plan.
+#
+# Every one of these reads a plain input variable, so at root they resolve at
+# plan and their postconditions fail the plan. The module never consumed their
+# values - aws_subnet and aws_route_table were referenced only as depends_on
+# targets - so nothing needs passing down.
+data "aws_subnet" "az1" {
+  count = local.is_multiaz ? 1 : 0
+  id    = var.subnet_az1
+
+  lifecycle {
+    postcondition {
+      condition     = self.availability_zone == var.az1
+      error_message = "subnet_az1 (${var.subnet_az1}) is in AZ ${self.availability_zone}, not az1=${var.az1}."
+    }
+    postcondition {
+      condition     = self.vpc_id == var.vpc
+      error_message = "subnet_az1 (${var.subnet_az1}) is in VPC ${self.vpc_id}, not ${var.vpc}."
+    }
+  }
+}
+
+data "aws_subnet" "az2" {
+  count = local.is_multiaz ? 1 : 0
+  id    = var.subnet_az2
+
+  lifecycle {
+    postcondition {
+      condition     = self.availability_zone == var.az2
+      error_message = "subnet_az2 (${var.subnet_az2}) is in AZ ${self.availability_zone}, not az2=${var.az2}."
+    }
+    postcondition {
+      condition     = self.vpc_id == var.vpc
+      error_message = "subnet_az2 (${var.subnet_az2}) is in VPC ${self.vpc_id}, not ${var.vpc}."
+    }
+  }
+}
+
+# The overlay cluster IP must be OUTSIDE every CIDR associated with the VPC -
+# it is reached via route-table entries, not a subnet.
+data "aws_vpc" "multiaz" {
+  count = local.is_multiaz ? 1 : 0
+  id    = var.vpc
+}
+
+# Any supplied client route tables must exist in the VPC.
+data "aws_route_table" "extra" {
+  for_each       = local.is_multiaz ? toset(var.route_table_ids) : toset([])
+  route_table_id = each.value
+
+  lifecycle {
+    postcondition {
+      condition     = self.vpc_id == var.vpc
+      error_message = "route table ${each.value} is in VPC ${self.vpc_id}, not ${var.vpc}."
+    }
+  }
+}
+
+# subnet_public, at ROOT level so both checks below fail the PLAN. Used by
+# standalone / ha / dsx (multi-AZ uses subnet_az1 + subnet_az2 above).
+data "aws_subnet" "public" {
+  count = !local.is_multiaz && trimspace(var.subnet_public) != "" ? 1 : 0
+  id    = var.subnet_public
+
+  lifecycle {
+    postcondition {
+      condition     = self.vpc_id == var.vpc
+      error_message = "subnet_public (${var.subnet_public}) is in VPC ${self.vpc_id}, not ${var.vpc}."
+    }
+  }
+}
+
+# ha only: the cluster IP is a secondary private IP on an ENI in subnet_public,
+# so unlike the multi-AZ overlay address it must be INSIDE the subnet - and not
+# one of the five addresses AWS reserves in every subnet.
+resource "terraform_data" "ha_cluster_ip_check" {
+  count = local.ha_pinned_cluster_ip ? 1 : 0
+
+  lifecycle {
+    precondition {
+      condition     = local.ha_cluster_ip_inside_subnet
+      error_message = "anvil_cluster_ip ${var.anvil_cluster_ip} is OUTSIDE subnet_public ${var.subnet_public} (${local._ha_subnet_cidr}) - in single-AZ HA the cluster IP is a secondary private IP on an ENI in that subnet, so it must fall inside it. (An overlay IP outside the range is the ha-multi-az design, not this one.)"
+    }
+    precondition {
+      condition     = !local.ha_cluster_ip_reserved
+      error_message = "anvil_cluster_ip ${var.anvil_cluster_ip} is one of the addresses AWS reserves in ${local._ha_subnet_cidr}: the first four (network, VPC router, DNS, reserved) and the last (broadcast) cannot be assigned."
+    }
+  }
+}
+
+# --- Elastic IPs allocated by this deployment (create_eips) ---
+# For a VPC with no private path from the operator: one address for the Anvil
+# (which also becomes the management endpoint) and one per DSX node. An EIP
+# association survives an instance stop/start in a VPC, unlike an
+# auto-assigned public IP, so these are stable across a BUSINESS_HOURS cycle.
+resource "aws_eip" "anvil" {
+  count = var.create_eips && local.creates_anvil ? 1 : 0
+
+  domain = "vpc"
+  tags   = merge(local.aws_tags, { Name = "anvil-1-${local.name_suffix}" })
+
+  depends_on = [terraform_data.validate_inputs]
+}
+
+resource "aws_eip" "dsx" {
+  count = var.create_eips ? var.dsx_count : 0
+
+  domain = "vpc"
+  tags   = merge(local.aws_tags, { Name = "dsx-${count.index + 1}-${local.name_suffix}" })
+
+  depends_on = [terraform_data.validate_inputs]
+}
+
+# The optional Elastic IP, looked up at ROOT level. A singular data source
+# errors when nothing matches, so this is already an existence check - it just
+# used to run inside the modules, where depends_on deferred it to apply and a
+# typo'd address failed only after the instances existed.
+data "aws_eip" "assoc" {
+  count     = var.eip != "" ? 1 : 0
+  public_ip = var.eip
+}
+
+resource "terraform_data" "overlay_ip_check" {
+  count = local.is_multiaz ? 1 : 0
+
+  lifecycle {
+    precondition {
+      condition     = !local.cluster_ip_inside_vpc
+      error_message = "anvil_cluster_ip ${var.anvil_cluster_ip} is INSIDE the VPC CIDR ${join(", ", local.multiaz_vpc_cidrs)} - multi-AZ HA needs an OVERLAY IP outside the VPC range (it is reached via route-table entries, not a subnet)."
+    }
+  }
+}
+
 # --- DSX node(s) ---
 module "dsx" {
   count  = var.dsx_count > 0 ? 1 : 0
   source = "./modules/dsx"
 
+  has_ephemeral        = local.dsx_has_ephemeral
   node_count           = var.dsx_count
   name_suffix          = local.name_suffix
   ami                  = var.hs_ami
@@ -248,7 +400,7 @@ module "dsx" {
   multiaz              = local.is_multiaz
   cluster_ip_prefixlen = var.anvil_cluster_ip_prefixlen
   route_table_ids      = var.route_table_ids
-  eip                  = local.is_standalone ? "" : var.eip
+  eip_allocation_ids   = local.dsx_eip_allocation_ids
   tags                 = local.aws_tags
 
   depends_on = [terraform_data.validate_inputs, module.preflight, module.wait_for_cluster]

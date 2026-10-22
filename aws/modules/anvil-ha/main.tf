@@ -9,13 +9,9 @@
 # boot second 0 and pd-first-boot never races the IP assignment.
 # ============================================================
 
-data "aws_ec2_instance_type" "anvil" {
-  instance_type = var.instance_type
-}
-
 locals {
   pinned        = trimspace(var.cluster_ip) != ""
-  has_ephemeral = data.aws_ec2_instance_type.anvil.instance_storage_supported
+  has_ephemeral = var.has_ephemeral
   meta_devices  = local.has_ephemeral ? [] : slice(["/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde"], 0, var.meta_disk_count)
   raid_opt      = var.raid_type == "stripe" ? "raid0" : "raid1"
 
@@ -85,10 +81,25 @@ resource "aws_network_interface" "secondary" {
 resource "terraform_data" "pin_cluster_ip" {
   count = local.pinned ? 1 : 0
 
-  triggers_replace = [aws_network_interface.secondary.id, var.cluster_ip]
+  # Deliberately NOT keyed on var.cluster_ip. Changing the cluster IP after
+  # deployment is not supported: the node read it from user_data at first boot
+  # (now ignore_changes'd), and re-running the CLI would ADD the new address
+  # while leaving the old one assigned to the ENI. Keyed on the ENI alone, a
+  # changed cluster_ip is a no-op rather than a half-applied change. To move
+  # the cluster IP, rebuild the deployment.
+  triggers_replace = [aws_network_interface.secondary.id]
 
   provisioner "local-exec" {
-    command = "${local.aws_cli} ec2 assign-private-ip-addresses --network-interface-id ${aws_network_interface.secondary.id} --private-ip-addresses ${var.cluster_ip}"
+    # Quoted even though the root validates anvil_cluster_ip as a bare IPv4:
+    # local-exec sets no interpreter, so this string goes to sh -c, and a module
+    # reused by a caller without that validation would splice its value in.
+    #
+    # --allow-reassignment makes this idempotent. Without it the CLI fails when
+    # the address is already on the ENI, which happens whenever this resource is
+    # replaced while the ENI itself does not change - including the one-off
+    # replacement that dropping var.cluster_ip from triggers_replace causes on
+    # an EXISTING deployment's next apply.
+    command = "${local.aws_cli} ec2 assign-private-ip-addresses --allow-reassignment --network-interface-id '${aws_network_interface.secondary.id}' --private-ip-addresses '${var.cluster_ip}'"
   }
 }
 
@@ -135,6 +146,21 @@ resource "aws_instance" "primary" {
   }
 
   tags = merge(var.tags, { Name = local.hostnames[0] })
+
+  lifecycle {
+    # Hammerspace reads user_data ONCE, at first boot. Without this, editing
+    # anything that feeds it - MTU, node roles, iam_admin_group, raid type, the
+    # cluster IP - produces a diff terraform applies while the running node
+    # keeps its original configuration: the apply reports success and nothing
+    # on the node changes.
+    #
+    # Deliberately ignore_changes and NOT user_data_replace_on_change = true:
+    # the latter is "correct" but destroys and recreates a live Anvil or DSX on
+    # an incidental edit, which is far worse. To change any of these, rebuild
+    # the node. Azure's hs-vm module does the same with custom_data.
+    ignore_changes = [user_data]
+  }
+
 }
 
 # --- Secondary Anvil, bound to the pre-created ENI ---
@@ -178,4 +204,19 @@ resource "aws_instance" "secondary" {
 
   # A pinned cluster IP must be on the ENI before first boot.
   depends_on = [terraform_data.pin_cluster_ip]
+
+  lifecycle {
+    # Hammerspace reads user_data ONCE, at first boot. Without this, editing
+    # anything that feeds it - MTU, node roles, iam_admin_group, raid type, the
+    # cluster IP - produces a diff terraform applies while the running node
+    # keeps its original configuration: the apply reports success and nothing
+    # on the node changes.
+    #
+    # Deliberately ignore_changes and NOT user_data_replace_on_change = true:
+    # the latter is "correct" but destroys and recreates a live Anvil or DSX on
+    # an incidental edit, which is far worse. To change any of these, rebuild
+    # the node. Azure's hs-vm module does the same with custom_data.
+    ignore_changes = [user_data]
+  }
+
 }

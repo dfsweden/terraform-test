@@ -1,3 +1,8 @@
+variable "has_ephemeral" {
+  type        = bool
+  description = "Whether the instance type has built-in instance storage (NVMe). Resolved at ROOT from the instance-type data source that already backs the vCPU/memory minimums - a module-local lookup would be deferred to apply by the caller's depends_on, leaving the volume count unknown at plan."
+}
+
 variable "name" {
   type        = string
   description = "Instance Name tag / hostname (anvil-1-<suffix>)."
@@ -61,7 +66,13 @@ variable "iam_admin_group" {
 variable "eip" {
   type        = string
   default     = ""
-  description = "Existing Elastic IP address to associate with the Anvil (empty = none)."
+  description = "Elastic IP ADDRESS, used for reporting (the association itself uses eip_allocation_id). Empty = no EIP."
+}
+
+variable "eip_allocation_ids" {
+  type        = list(string)
+  default     = []
+  description = "Elastic IP allocation ID to associate, as a 0-or-1 element list. A list rather than a string so the count is known at PLAN: the ID itself is unknown until apply when the address is allocated in the same run, and comparing an unknown to \"\" makes terraform refuse the plan."
 }
 
 variable "tags" {

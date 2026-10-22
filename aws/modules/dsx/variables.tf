@@ -1,3 +1,8 @@
+variable "has_ephemeral" {
+  type        = bool
+  description = "Whether the instance type has built-in instance storage (NVMe). Resolved at ROOT from the instance-type data source that already backs the vCPU/memory minimums - a module-local lookup would be deferred to apply by the caller's depends_on, leaving the volume count unknown at plan."
+}
+
 variable "node_count" {
   type = number
 }
@@ -82,10 +87,11 @@ variable "route_table_ids" {
   default = []
 }
 
-variable "eip" {
-  type        = string
-  default     = ""
-  description = "Existing Elastic IP address to associate with the FIRST DSX node (empty = none)."
+
+variable "eip_allocation_ids" {
+  type        = list(string)
+  default     = []
+  description = "Elastic IP allocation IDs, one per node in order. Empty = no association. A single entry associates with the first node only, which is what a lone var.eip does."
 }
 
 variable "tags" {

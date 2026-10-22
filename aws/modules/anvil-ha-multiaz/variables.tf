@@ -1,3 +1,8 @@
+variable "has_ephemeral" {
+  type        = bool
+  description = "Whether the instance type has built-in instance storage (NVMe). Resolved at ROOT from the instance-type data source that already backs the vCPU/memory minimums - a module-local lookup would be deferred to apply by the caller's depends_on, leaving the volume count unknown at plan."
+}
+
 variable "name_suffix" {
   type = string
 }

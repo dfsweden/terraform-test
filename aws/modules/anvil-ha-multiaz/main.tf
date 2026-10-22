@@ -8,94 +8,13 @@
 #   An internal NLB (both subnets) fronts 443 (mgmt/UI) + 22 (SSH).
 #
 # The cross-AZ topology checks (subnet AZ/VPC membership, overlay
-# IP outside the VPC CIDR, route tables in the VPC) run natively
-# at plan time via data-source postconditions - the equivalent of
-# the stricter multi-AZ pre-flight.
+# IP outside the VPC CIDR, route tables in the VPC) live in the ROOT
+# module. They were here, but this module is called with depends_on,
+# which defers its data sources to apply - so they never ran at plan.
 # ============================================================
 
-data "aws_ec2_instance_type" "anvil" {
-  instance_type = var.instance_type
-}
-
-# --- Cross-AZ topology validation (hard stop at plan time) ---
-data "aws_subnet" "az1" {
-  id = var.subnet_az1
-
-  lifecycle {
-    postcondition {
-      condition     = self.availability_zone == var.az1
-      error_message = "subnet_az1 (${var.subnet_az1}) is in AZ ${self.availability_zone}, not az1=${var.az1}."
-    }
-    postcondition {
-      condition     = self.vpc_id == var.vpc_id
-      error_message = "subnet_az1 (${var.subnet_az1}) is in VPC ${self.vpc_id}, not ${var.vpc_id}."
-    }
-  }
-}
-
-data "aws_subnet" "az2" {
-  id = var.subnet_az2
-
-  lifecycle {
-    postcondition {
-      condition     = self.availability_zone == var.az2
-      error_message = "subnet_az2 (${var.subnet_az2}) is in AZ ${self.availability_zone}, not az2=${var.az2}."
-    }
-    postcondition {
-      condition     = self.vpc_id == var.vpc_id
-      error_message = "subnet_az2 (${var.subnet_az2}) is in VPC ${self.vpc_id}, not ${var.vpc_id}."
-    }
-  }
-}
-
-# The overlay cluster IP must be OUTSIDE every CIDR associated with the VPC -
-# it is reached via route-table entries, not a subnet.
-data "aws_vpc" "this" {
-  id = var.vpc_id
-}
-
-resource "terraform_data" "overlay_ip_check" {
-  lifecycle {
-    precondition {
-      condition     = !local.cluster_ip_inside_vpc
-      error_message = "anvil_cluster_ip ${var.cluster_ip} is INSIDE the VPC CIDR ${join(", ", [for a in data.aws_vpc.this.cidr_block_associations : a.cidr_block])} - multi-AZ HA needs an OVERLAY IP outside the VPC range (it is reached via route-table entries, not a subnet)."
-    }
-  }
-}
-
-# Any supplied client route tables must exist in the VPC.
-data "aws_route_table" "extra" {
-  for_each       = toset(var.route_table_ids)
-  route_table_id = each.value
-
-  lifecycle {
-    postcondition {
-      condition     = self.vpc_id == var.vpc_id
-      error_message = "route table ${each.value} is in VPC ${self.vpc_id}, not ${var.vpc_id}."
-    }
-  }
-}
-
 locals {
-  # IPv4 maths for the inside/outside-VPC-CIDR test (no cidrcontains() in HCL).
-  _ip_octets = [for o in split(".", var.cluster_ip) : tonumber(o)]
-  _ip_num    = local._ip_octets[0] * 16777216 + local._ip_octets[1] * 65536 + local._ip_octets[2] * 256 + local._ip_octets[3]
-  _cidr_ranges = [
-    for a in data.aws_vpc.this.cidr_block_associations : {
-      first = (
-        tonumber(split(".", cidrhost(a.cidr_block, 0))[0]) * 16777216
-        + tonumber(split(".", cidrhost(a.cidr_block, 0))[1]) * 65536
-        + tonumber(split(".", cidrhost(a.cidr_block, 0))[2]) * 256
-        + tonumber(split(".", cidrhost(a.cidr_block, 0))[3])
-      )
-      size = pow(2, 32 - tonumber(split("/", a.cidr_block)[1]))
-    }
-  ]
-  cluster_ip_inside_vpc = anytrue([
-    for r in local._cidr_ranges : local._ip_num >= r.first && local._ip_num < r.first + r.size
-  ])
-
-  has_ephemeral = data.aws_ec2_instance_type.anvil.instance_storage_supported
+  has_ephemeral = var.has_ephemeral
   meta_devices  = local.has_ephemeral ? [] : slice(["/dev/sdb", "/dev/sdc", "/dev/sdd", "/dev/sde"], 0, var.meta_disk_count)
   raid_opt      = var.raid_type == "stripe" ? "raid0" : "raid1"
 
@@ -185,7 +104,21 @@ resource "aws_instance" "primary" {
 
   tags = merge(var.tags, { Name = local.hostnames[0] })
 
-  depends_on = [data.aws_subnet.az1, terraform_data.overlay_ip_check, data.aws_route_table.extra]
+
+  lifecycle {
+    # Hammerspace reads user_data ONCE, at first boot. Without this, editing
+    # anything that feeds it - MTU, node roles, iam_admin_group, raid type, the
+    # cluster IP - produces a diff terraform applies while the running node
+    # keeps its original configuration: the apply reports success and nothing
+    # on the node changes.
+    #
+    # Deliberately ignore_changes and NOT user_data_replace_on_change = true:
+    # the latter is "correct" but destroys and recreates a live Anvil or DSX on
+    # an incidental edit, which is far worse. To change any of these, rebuild
+    # the node. Azure's hs-vm module does the same with custom_data.
+    ignore_changes = [user_data]
+  }
+
 }
 
 resource "aws_instance" "secondary" {
@@ -223,7 +156,21 @@ resource "aws_instance" "secondary" {
 
   tags = merge(var.tags, { Name = local.hostnames[1] })
 
-  depends_on = [data.aws_subnet.az2, terraform_data.overlay_ip_check, data.aws_route_table.extra]
+
+  lifecycle {
+    # Hammerspace reads user_data ONCE, at first boot. Without this, editing
+    # anything that feeds it - MTU, node roles, iam_admin_group, raid type, the
+    # cluster IP - produces a diff terraform applies while the running node
+    # keeps its original configuration: the apply reports success and nothing
+    # on the node changes.
+    #
+    # Deliberately ignore_changes and NOT user_data_replace_on_change = true:
+    # the latter is "correct" but destroys and recreates a live Anvil or DSX on
+    # an incidental edit, which is far worse. To change any of these, rebuild
+    # the node. Azure's hs-vm module does the same with custom_data.
+    ignore_changes = [user_data]
+  }
+
 }
 
 # --- Internal NLB across both subnets (mgmt 443 + SSH 22) ---

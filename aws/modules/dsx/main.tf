@@ -3,23 +3,8 @@
 # aws_provision_dsx_node Ansible role.
 # ============================================================
 
-# Ephemeral / instance-store detection: on types with built-in NVMe drives
-# the data EBS volumes are skipped (Hammerspace uses the built-in drives).
-# The boot volume (/dev/sda1) is ALWAYS provisioned.
-data "aws_ec2_instance_type" "dsx" {
-  instance_type = var.instance_type
-
-  lifecycle {
-    # Product minimum for a DSX node: 8 vCPU / 16 GiB.
-    postcondition {
-      condition     = self.default_vcpus >= 8 && self.memory_size >= 16384
-      error_message = "DSX instance type ${var.instance_type} is below the product minimum: has ${self.default_vcpus} vCPU / ${self.memory_size} MiB, needs at least 8 vCPU / 16 GiB."
-    }
-  }
-}
-
 locals {
-  has_ephemeral = data.aws_ec2_instance_type.dsx.instance_storage_supported
+  has_ephemeral = var.has_ephemeral
 
   boot_volume  = one([for v in var.volumes : v if v.device_name == "/dev/sda1"])
   data_volumes = local.has_ephemeral ? [] : [for v in var.volumes : v if v.device_name != "/dev/sda1"]
@@ -107,16 +92,28 @@ resource "aws_instance" "dsx" {
   }
 
   tags = merge(var.tags, { Name = "dsx-${count.index + 1}-${var.name_suffix}" })
+
+  lifecycle {
+    # Hammerspace reads user_data ONCE, at first boot. Without this, editing
+    # anything that feeds it - MTU, node roles, iam_admin_group, raid type, the
+    # cluster IP - produces a diff terraform applies while the running node
+    # keeps its original configuration: the apply reports success and nothing
+    # on the node changes.
+    #
+    # Deliberately ignore_changes and NOT user_data_replace_on_change = true:
+    # the latter is "correct" but destroys and recreates a live Anvil or DSX on
+    # an incidental edit, which is far worse. To change any of these, rebuild
+    # the node. Azure's hs-vm module does the same with custom_data.
+    ignore_changes = [user_data]
+  }
+
 }
 
-# Optional Elastic IP association with the first DSX node.
-data "aws_eip" "this" {
-  count     = var.eip != "" && var.node_count > 0 ? 1 : 0
-  public_ip = var.eip
-}
-
+# Optional Elastic IP association, one per node in order. A single supplied
+# address lands on the first node, as it always did; create_eips supplies one
+# per node.
 resource "aws_eip_association" "this" {
-  count         = var.eip != "" && var.node_count > 0 ? 1 : 0
-  instance_id   = aws_instance.dsx[0].id
-  allocation_id = data.aws_eip.this[0].id
+  count         = min(length(var.eip_allocation_ids), var.node_count)
+  instance_id   = aws_instance.dsx[count.index].id
+  allocation_id = var.eip_allocation_ids[count.index]
 }

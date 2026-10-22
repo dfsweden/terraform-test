@@ -32,7 +32,7 @@ iam_admin_group           = "<YOUR_IAM_ADMIN_GROUP>"
 hs_ami = "<YOUR_HAMMERSPACE_AMI_ID>"
 
 # --- HA Anvil ---
-anvil_instance_type = "m7a.4xlarge" # Anvil minimum is 16 vCPU / 32 GiB
+anvil_instance_type = "m8i.4xlarge" # Anvil minimum is 16 vCPU / 32 GiB
 
 # ----------------------------------------------------------
 # Anvil disk configuration
@@ -56,7 +56,7 @@ anvil_cluster_ip      = ""       # empty => auto-allocate the floating IP
 
 # --- DSX ---
 dsx_count         = 1
-dsx_instance_type = "m7a.2xlarge" # DSX minimum is 8 vCPU / 16 GiB
+dsx_instance_type = "m8i.2xlarge" # DSX minimum is 8 vCPU / 16 GiB
 
 # ----------------------------------------------------------
 # DSX disk configuration

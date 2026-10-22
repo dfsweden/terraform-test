@@ -52,6 +52,16 @@ output "dsx_instance_ids" {
   value = flatten(module.dsx[*].instance_ids)
 }
 
+output "anvil_public_ip" {
+  description = "Anvil Elastic IP - the only way in when the VPC has no private path (create_eips or var.eip)."
+  value       = local.created_anvil_eip != "" ? local.created_anvil_eip : (local.is_standalone && var.eip != "" ? var.eip : null)
+}
+
+output "dsx_public_ips" {
+  description = "DSX Elastic IPs, in node order."
+  value       = flatten(module.dsx[*].eip_public_ips)
+}
+
 output "dsx_private_ips" {
   description = "Private IPs of the DSX nodes (the Terraform-state equivalent of the temp_dsx_ips_<timestamp> file)."
   value       = flatten(module.dsx[*].private_ips)
